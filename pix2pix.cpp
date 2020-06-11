@@ -296,10 +296,16 @@ void postprocess_one_image(Tensor input, uint8_t *out, size_t idx) {
   #ifdef SHOW_TIME
   START
   #endif
-  #pragma omp parallel for num_threads(num_threads)
-  for (size_t i = 0; i < H * W * C; ++i) {
-    float x = (input.buf[i] + 1) / 2 * 255;
-    out[idx * (H * W * C) + i] = x < 0 ? 0 : (x > 255 ? 255 : x);
+  const size_t img_size = H * W * C;
+  const size_t block_size = img_size / 128 / 1024 + (img_size % (128 * 1024) != 0);
+  for (size_t block = 0; block < block_size; block++) {
+    const size_t block_min = img_size * (block) / block_size;
+    const size_t block_max = img_size * (block + 1) / block_size;
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = block_min; i < block_max; ++i) { // 256 * 256 * 3 * 8
+      float x = (input.buf[i] + 1) / 2 * 255;
+      out[idx * img_size + i] = x < 0 ? 0 : (x > 255 ? 255 : x);
+    }
   }
   #ifdef SHOW_TIME
   END("postprocess_one_image")
@@ -318,9 +324,15 @@ void get_one_image(Tensor input, Tensor &output, size_t idx) {
   #ifdef SHOW_TIME
   START
   #endif
-  #pragma omp parallel for num_threads(num_threads)
-  for (size_t i = 0; i < H * W * C; ++i) {
-    output.buf[i] = input.buf[idx * H * W * C + i];
+  const size_t img_size = H * W * C;
+  const size_t block_size = img_size / 128 / 1024 + (img_size % (128 * 1024) != 0);
+  for (size_t block = 0; block < block_size; block++) {
+    const size_t block_min = img_size * (block) / block_size;
+    const size_t block_max = img_size * (block + 1) / block_size;
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = block_min; i < block_max; ++i) { // 256 * 256 * 3 * 8
+      output.buf[i] = input.buf[idx * img_size + i];
+    }
   }
   #ifdef SHOW_TIME
   END("get_one_image")
