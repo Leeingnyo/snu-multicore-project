@@ -276,9 +276,15 @@ Tensor preprocess(uint8_t *in, size_t num_image) {
   #ifdef SHOW_TIME
   START
   #endif
-  #pragma omp parallel for num_threads(num_threads)
-  for (size_t i = 0; i < out.sz; ++i) {
-    out.buf[i] = in[i] / 255.0f * 2 - 1;
+  const size_t img_size = out.sz;
+  const size_t block_size = img_size / 128 / 1024 + (img_size % (128 * 1024) != 0);
+  for (size_t block = 0; block < block_size; block++) {
+    const size_t block_min = img_size * (block) / block_size;
+    const size_t block_max = img_size * (block + 1) / block_size;
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t i = block_min; i < block_max; ++i) {
+      out.buf[i] = in[i] / 255.0f * 2 - 1;
+    }
   }
   #ifdef SHOW_TIME
   END("preprocess")
