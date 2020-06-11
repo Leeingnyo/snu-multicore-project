@@ -2,9 +2,13 @@
 
 #include "util.h"
 
+#include <omp.h>
+
 #include <string>
 #include <map>
 #include <cmath>
+
+int num_threads = 16;
 
 class Tensor {
 public:
