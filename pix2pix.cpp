@@ -268,6 +268,7 @@ Tensor preprocess(uint8_t *in, size_t num_image) {
   for (size_t i = 0; i < out.sz; ++i) {
     out.buf[i] = in[i] / 255.0f * 2 - 1;
   }
+  // PROJECT - USE CPU MULTITHREAD TO CALCULATE
   return out;
 }
 
@@ -279,6 +280,7 @@ void postprocess_one_image(Tensor input, uint8_t *out, size_t idx) {
     float x = (input.buf[i] + 1) / 2 * 255;
     out[idx * (H * W * C) + i] = x < 0 ? 0 : (x > 255 ? 255 : x);
   }
+  // PROJECT - USE CPU MULTITHREAD TO CALCULATE
 }
 
 // Pick single image from images
@@ -290,6 +292,7 @@ void get_one_image(Tensor input, Tensor &output, size_t idx) {
   for (size_t i = 0; i < H * W * C; ++i) {
     output.buf[i] = input.buf[idx * H * W * C + i];
   }
+  // PROJECT - USE CPU MULTITHREAD TO COPY
 }
 
 // Convolution (2-dimension, stride = 2, pad = 1)
@@ -327,6 +330,7 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
       }
     }
   }
+  // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
 }
 
 // Transposed convolution (2-dimension, stride = 2, pad = 1)
@@ -367,6 +371,7 @@ void conv2d_transposed(Tensor input, Tensor filter, Tensor bias, Tensor &output)
       }
     }
   }
+  // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
 }
 
 // Leaky ReLU
@@ -378,6 +383,7 @@ void leaky_relu(Tensor input, Tensor &output, float alpha) {
   for (size_t i = 0; i < H * W * C; ++i) {
     output.buf[i] = input.buf[i] >= 0 ? input.buf[i] : alpha * input.buf[i];
   }
+  // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
 }
 
 // ReLU
@@ -389,6 +395,7 @@ void relu(Tensor input, Tensor &output) {
   for (size_t i = 0; i < H * W * C; ++i) {
     output.buf[i] = input.buf[i] >= 0 ? input.buf[i] : 0;
   }
+  // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
 }
 
 // Batch normalization (channel-wise)
@@ -407,6 +414,7 @@ void batchnorm(Tensor input, Tensor scale, Tensor offset, Tensor &output) {
         sum += ii;
       }
     }
+    // PROJECT - USE CPU MULTITHREAD TO CALCULATE reduction
     float mean = sum / (H * W);
 
     float sqsum = 0;
@@ -416,6 +424,7 @@ void batchnorm(Tensor input, Tensor scale, Tensor offset, Tensor &output) {
         sqsum += (ii - mean) * (ii - mean);
       }
     }
+    // PROJECT - USE CPU MULTITHREAD TO CALCULATE reduction
     float variance = sqsum / (H * W);
 
     const float epsilon = 1e-5;
@@ -425,6 +434,7 @@ void batchnorm(Tensor input, Tensor scale, Tensor offset, Tensor &output) {
         output.buf[idx] = offset.buf[c] + (input.buf[idx] - mean) * scale.buf[c] / sqrtf(variance + epsilon);
       }
     }
+    // PROJECT - USE CPU MULTITHREAD TO CALCULATE
   }
 }
 
@@ -446,6 +456,7 @@ void concat(Tensor input0, Tensor input1, Tensor &output) {
       }
     }
   }
+  // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
 }
 
 // Elementwise tanh
@@ -457,4 +468,5 @@ void elem_tanh(Tensor input, Tensor &output) {
   for (size_t i = 0; i < H * W * C; ++i) {
     output.buf[i] = tanhf(input.buf[i]);
   }
+  // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
 }
