@@ -10,7 +10,7 @@ CXXFLAGS=-std=c++11 -Wall -O3 -mavx2
 all: $(TARGET)
 
 pix2pix.o: pix2pix.cpp pix2pix.h util.h
-	g++ -c pix2pix.cpp -o pix2pix.o -std=c++11 -Wall -O3 -mavx
+	g++ -c pix2pix.cpp -o pix2pix.o -std=c++11 -Wall -O3 -mavx -fopenmp
 
 $(TARGET): $(OBJECTS)
 
