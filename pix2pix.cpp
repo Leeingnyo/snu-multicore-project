@@ -8,6 +8,10 @@
 #include <map>
 #include <cmath>
 
+// #define SHOW_TIME
+#define START double st = get_time();
+#define END(x) double et = get_time(); printf("\n%s! (%lf s)", x, et - st);
+
 int num_threads = 16;
 
 class Tensor {
@@ -269,10 +273,19 @@ std::map<std::string, Tensor> register_weights(float* weight_buf) {
 // Convert 8-bit depth images (value range [0, 255]) into floating-point ones (value range [-1, 1])
 Tensor preprocess(uint8_t *in, size_t num_image) {
   Tensor out(NULL, {num_image, 256, 256, 3});
+  #ifdef SHOW_TIME
+  START
+  #endif
+  #pragma omp parallel for num_threads(num_threads)
   for (size_t i = 0; i < out.sz; ++i) {
     out.buf[i] = in[i] / 255.0f * 2 - 1;
   }
+  #ifdef SHOW_TIME
+  END("preprocess")
+  #endif
   // PROJECT - USE CPU MULTITHREAD TO CALCULATE
+  // CPU
+  // Caching
   return out;
 }
 
@@ -280,11 +293,20 @@ Tensor preprocess(uint8_t *in, size_t num_image) {
 void postprocess_one_image(Tensor input, uint8_t *out, size_t idx) {
   // input shape = (height, width, channels)
   size_t H = input.shape[0], W = input.shape[1], C = input.shape[2];
+  #ifdef SHOW_TIME
+  START
+  #endif
+  #pragma omp parallel for num_threads(num_threads)
   for (size_t i = 0; i < H * W * C; ++i) {
     float x = (input.buf[i] + 1) / 2 * 255;
     out[idx * (H * W * C) + i] = x < 0 ? 0 : (x > 255 ? 255 : x);
   }
+  #ifdef SHOW_TIME
+  END("postprocess_one_image")
+  #endif
   // PROJECT - USE CPU MULTITHREAD TO CALCULATE
+  // CPU
+  // Caching
 }
 
 // Pick single image from images
@@ -293,10 +315,19 @@ void get_one_image(Tensor input, Tensor &output, size_t idx) {
   // output shape = (height, width, channels)
   size_t H = input.shape[1], W = input.shape[2], C = input.shape[3];
   output.alloc_once({H, W, C});
+  #ifdef SHOW_TIME
+  START
+  #endif
+  #pragma omp parallel for num_threads(num_threads)
   for (size_t i = 0; i < H * W * C; ++i) {
     output.buf[i] = input.buf[idx * H * W * C + i];
   }
+  #ifdef SHOW_TIME
+  END("get_one_image")
+  #endif
   // PROJECT - USE CPU MULTITHREAD TO COPY
+  // CPU
+  // Caching
 }
 
 // Convolution (2-dimension, stride = 2, pad = 1)
@@ -311,8 +342,12 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
   size_t OH = H / stride, OW = W / stride;
   output.alloc_once({OH, OW, K});
 
+  #ifdef SHOW_TIME
+  START
+  #endif
   for (size_t k = 0; k < K; ++k) {
     for (size_t oh = 0; oh < OH; ++oh) {
+      #pragma omp parallel for num_threads(num_threads)
       for (size_t ow = 0; ow < OW; ++ow) {
         float x = bias.buf[k];
         for (size_t c = 0; c < C; ++c) {
@@ -334,6 +369,9 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
       }
     }
   }
+  #ifdef SHOW_TIME
+  END("conv2d")
+  #endif
   // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
 }
 
@@ -350,8 +388,12 @@ void conv2d_transposed(Tensor input, Tensor filter, Tensor bias, Tensor &output)
   size_t OH = H * stride, OW = W * stride;
   output.alloc_once({OH, OW, K});
 
+  #ifdef SHOW_TIME
+  START
+  #endif
   for (size_t k = 0; k < K; ++k) {
     for (size_t oh = 0; oh < OH; ++oh) {
+      #pragma omp parallel for num_threads(num_threads)
       for (size_t ow = 0; ow < OW; ++ow) {
         float x = bias.buf[k];
         for (size_t c = 0; c < C; ++c) {
@@ -375,6 +417,9 @@ void conv2d_transposed(Tensor input, Tensor filter, Tensor bias, Tensor &output)
       }
     }
   }
+  #ifdef SHOW_TIME
+  END("conv2d_transposed")
+  #endif
   // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
 }
 
@@ -384,9 +429,16 @@ void leaky_relu(Tensor input, Tensor &output, float alpha) {
   // output shape = (height, width, channels)
   size_t H = input.shape[0], W = input.shape[1], C = input.shape[2];
   output.alloc_once({H, W, C});
+  #ifdef SHOW_TIME
+  START
+  #endif
+  #pragma omp parallel for num_threads(num_threads)
   for (size_t i = 0; i < H * W * C; ++i) {
     output.buf[i] = input.buf[i] >= 0 ? input.buf[i] : alpha * input.buf[i];
   }
+  #ifdef SHOW_TIME
+  END("leaky_relu")
+  #endif
   // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
 }
 
@@ -396,9 +448,16 @@ void relu(Tensor input, Tensor &output) {
   // output shape = (height, width, channels)
   size_t H = input.shape[0], W = input.shape[1], C = input.shape[2];
   output.alloc_once({H, W, C});
+  #ifdef SHOW_TIME
+  START
+  #endif
+  #pragma omp parallel for num_threads(num_threads)
   for (size_t i = 0; i < H * W * C; ++i) {
     output.buf[i] = input.buf[i] >= 0 ? input.buf[i] : 0;
   }
+  #ifdef SHOW_TIME
+  END("relu")
+  #endif
   // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
 }
 
@@ -410,6 +469,10 @@ void batchnorm(Tensor input, Tensor scale, Tensor offset, Tensor &output) {
   // output shape = (height, width, channels)
   size_t H = input.shape[0], W = input.shape[1], C = input.shape[2];
   output.alloc_once({H, W, C});
+  #ifdef SHOW_TIME
+  START
+  #endif
+  #pragma omp parallel for num_threads(num_threads)
   for (size_t c = 0; c < C; ++c) {
     float sum = 0;
     for (size_t h = 0; h < H; ++h) {
@@ -440,6 +503,9 @@ void batchnorm(Tensor input, Tensor scale, Tensor offset, Tensor &output) {
     }
     // PROJECT - USE CPU MULTITHREAD TO CALCULATE
   }
+  #ifdef SHOW_TIME
+  END("batchnorm")
+  #endif
 }
 
 // Concatenation (along channel dimension)
@@ -450,7 +516,11 @@ void concat(Tensor input0, Tensor input1, Tensor &output) {
   size_t H = input0.shape[0], W = input0.shape[1], C0 = input0.shape[2];
   size_t C1 = input1.shape[2];
   output.alloc_once({H, W, C0 + C1});
+  #ifdef SHOW_TIME
+  START
+  #endif
   for (size_t h = 0; h < H; ++h) {
+    #pragma omp parallel for num_threads(num_threads)
     for (size_t w = 0; w < W; ++w) {
       for (size_t c = 0; c < C0; ++c) {
         output.buf[h * W * (C0 + C1) + w * (C0 + C1) + c] = input0.buf[h * W * C0 + w * C0 + c];
@@ -460,7 +530,12 @@ void concat(Tensor input0, Tensor input1, Tensor &output) {
       }
     }
   }
+  #ifdef SHOW_TIME
+  END("concat")
+  #endif
   // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
+  // GPU
+  // Caching
 }
 
 // Elementwise tanh
@@ -469,8 +544,15 @@ void elem_tanh(Tensor input, Tensor &output) {
   // output shape = (height, width, channels)
   size_t H = input.shape[0], W = input.shape[1], C = input.shape[2];
   output.alloc_once({H, W, C});
+  #ifdef SHOW_TIME
+  START
+  #endif
+  #pragma omp parallel for num_threads(num_threads)
   for (size_t i = 0; i < H * W * C; ++i) {
     output.buf[i] = tanhf(input.buf[i]);
   }
+  #ifdef SHOW_TIME
+  END("elem_tanh")
+  #endif
   // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
 }
