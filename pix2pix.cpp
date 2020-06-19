@@ -364,13 +364,13 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
   START
   #endif
   #pragma omp parallel for num_threads(num_threads)
-  for (size_t k = 0; k < K; ++k) {
-    for (size_t oh = 0; oh < OH; ++oh) {
-      for (size_t ow = 0; ow < OW; ++ow) {
+  for (size_t oh = 0; oh < OH; ++oh) {
+    for (size_t ow = 0; ow < OW; ++ow) {
+      for (size_t k = 0; k < K; ++k) {
         float x = bias.buf[k];
-        for (size_t c = 0; c < C; ++c) {
-          for (size_t r = 0; r < R; ++r) {
-            for (size_t s = 0; s < S; ++s) {
+        for (size_t r = 0; r < R; ++r) {
+          for (size_t s = 0; s < S; ++s) {
+            for (size_t c = 0; c < C; ++c) {
               // input (oh * stride - pad + r, ow * stride - pad + s, c)
               size_t ih = oh * stride - pad + r;
               size_t iw = ow * stride - pad + s;
@@ -410,13 +410,13 @@ void conv2d_transposed(Tensor input, Tensor filter, Tensor bias, Tensor &output)
   START
   #endif
   #pragma omp parallel for num_threads(num_threads)
-  for (size_t k = 0; k < K; ++k) {
-    for (size_t oh = 0; oh < OH; ++oh) {
-      for (size_t ow = 0; ow < OW; ++ow) {
+  for (size_t oh = 0; oh < OH; ++oh) {
+    for (size_t ow = 0; ow < OW; ++ow) {
+      for (size_t k = 0; k < K; ++k) {
         float x = bias.buf[k];
-        for (size_t c = 0; c < C; ++c) {
-          for (size_t r = 0; r < R; ++r) {
-            for (size_t s = 0; s < S; ++s) {
+        for (size_t r = 0; r < R; ++r) {
+          for (size_t s = 0; s < S; ++s) {
+            for (size_t c = 0; c < C; ++c) {
               // input ((oh - r + pad) / stride, (ow - s + pad) / stride, c)
               //   where (oh - r + pad) % stride == 0 && (ow - s + pad) % stride == 0
               if ((oh - r + pad) % stride != 0 || (ow - s + pad) % stride != 0) continue;
@@ -537,8 +537,8 @@ void concat(Tensor input0, Tensor input1, Tensor &output) {
   #ifdef SHOW_TIME
   START
   #endif
+  #pragma omp parallel for num_threads(num_threads)
   for (size_t h = 0; h < H; ++h) {
-    #pragma omp parallel for num_threads(num_threads)
     for (size_t w = 0; w < W; ++w) {
       for (size_t c = 0; c < C0; ++c) {
         output.buf[h * W * (C0 + C1) + w * (C0 + C1) + c] = input0.buf[h * W * C0 + w * C0 + c];
