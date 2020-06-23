@@ -285,7 +285,6 @@ Tensor preprocess(uint8_t *in, size_t num_image) {
   for (size_t block = 0; block < block_size; block++) {
     const size_t block_min = img_size * (block) / block_size;
     const size_t block_max = img_size * (block + 1) / block_size;
-    #pragma omp parallel for num_threads(num_threads)
     for (size_t i = block_min; i < block_max; ++i) {
       out.buf[i] = in[i] / 255.0f * 2 - 1;
     }
@@ -311,7 +310,6 @@ void postprocess_one_image(Tensor input, uint8_t *out, size_t idx) {
   for (size_t block = 0; block < block_size; block++) {
     const size_t block_min = img_size * (block) / block_size;
     const size_t block_max = img_size * (block + 1) / block_size;
-    // #pragma omp parallel for num_threads(num_threads)
     for (size_t i = block_min; i < block_max; ++i) { // 256 * 256 * 3 * 8
       float x = (input.buf[i] + 1) / 2 * 255;
       out[idx * img_size + i] = x < 0 ? 0 : (x > 255 ? 255 : x);
@@ -339,7 +337,6 @@ void get_one_image(Tensor input, Tensor &output, size_t idx) {
   for (size_t block = 0; block < block_size; block++) {
     const size_t block_min = img_size * (block) / block_size;
     const size_t block_max = img_size * (block + 1) / block_size;
-    // #pragma omp parallel for num_threads(num_threads)
     for (size_t i = block_min; i < block_max; ++i) { // 256 * 256 * 3 * 8
       output.buf[i] = input.buf[idx * img_size + i];
     }
@@ -375,7 +372,6 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
   LOG2S(OH, OH_p);
   LOG2S(OW, OW_p);
   const size_t OWK_p = OW_p + K_p;
-  // #pragma omp parallel for num_threads(num_threads)
   for (size_t ohowk = 0; ohowk < OH * OW * K; ++ohowk) {
     size_t oh = ohowk >> OWK_p;
     size_t ow = (ohowk >> K_p) & ((1 << OW_p) - 1);
@@ -422,7 +418,6 @@ void conv2d_transposed(Tensor input, Tensor filter, Tensor bias, Tensor &output)
   #endif
   // printf("conv2d_transposed : K %lu OH %lu OW %lu total %lu R %lu S %lu C %lu\n", K, OH, OW, K * OH * OW, R, S, C);
   const size_t OWK = OW * K;
-  // #pragma omp parallel for num_threads(num_threads)
   for (size_t ohowk = 0; ohowk < OH * OW * K; ++ohowk) {
     size_t oh = ohowk / OWK;
     size_t ow = ohowk / K % OW;
@@ -462,7 +457,6 @@ void leaky_relu(Tensor input, Tensor &output, float alpha) {
   #ifdef SHOW_TIME
   START
   #endif
-  // #pragma omp parallel for num_threads(num_threads)
   for (size_t i = 0; i < H * W * C; ++i) {
     output.buf[i] = input.buf[i] >= 0 ? input.buf[i] : alpha * input.buf[i];
   }
@@ -481,7 +475,6 @@ void relu(Tensor input, Tensor &output) {
   #ifdef SHOW_TIME
   START
   #endif
-  // #pragma omp parallel for num_threads(num_threads)
   for (size_t i = 0; i < H * W * C; ++i) {
     output.buf[i] = input.buf[i] >= 0 ? input.buf[i] : 0;
   }
@@ -502,7 +495,6 @@ void batchnorm(Tensor input, Tensor scale, Tensor offset, Tensor &output) {
   #ifdef SHOW_TIME
   START
   #endif
-  // #pragma omp parallel for num_threads(num_threads)
   for (size_t c = 0; c < C; ++c) {
     float sum = 0;
     for (size_t h = 0; h < H; ++h) {
@@ -549,7 +541,6 @@ void concat(Tensor input0, Tensor input1, Tensor &output) {
   #ifdef SHOW_TIME
   START
   #endif
-  // #pragma omp parallel for num_threads(num_threads)
   for (size_t h = 0; h < H; ++h) {
     for (size_t w = 0; w < W; ++w) {
       for (size_t c = 0; c < C0; ++c) {
@@ -577,7 +568,6 @@ void elem_tanh(Tensor input, Tensor &output) {
   #ifdef SHOW_TIME
   START
   #endif
-  // #pragma omp parallel for num_threads(num_threads)
   for (size_t i = 0; i < H * W * C; ++i) {
     output.buf[i] = tanhf(input.buf[i]);
   }
