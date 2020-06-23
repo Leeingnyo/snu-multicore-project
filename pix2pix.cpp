@@ -403,11 +403,11 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
     VECTOR_TYPE x = VECTOR_LOAD(bias.buf + k);
     for (size_t r = 0; r < R; ++r) {
       for (size_t s = 0; s < S; ++s) {
+        // input (oh * stride - pad + r, ow * stride - pad + s, c)
+        size_t ih = oh * stride - pad + r;
+        size_t iw = ow * stride - pad + s;
+        if (ih < 0 || ih >= H || iw < 0 || iw >= W) continue;
         for (size_t c = 0; c < C; ++c) {
-          // input (oh * stride - pad + r, ow * stride - pad + s, c)
-          size_t ih = oh * stride - pad + r;
-          size_t iw = ow * stride - pad + s;
-          if (ih < 0 || ih >= H || iw < 0 || iw >= W) continue;
           float ii = input.buf[ih * W * C + iw * C + c];
           // filter (r, s, c, k)
           x = VECTOR_ADD(x,
@@ -417,7 +417,7 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
       }
     }
     // output (oh, ow, k)
-    VECTOR_STORE(output.buf + (oh * OW * K + ow * K + k), x);
+    VECTOR_STORE(output.buf + ohowk, x);
   }
   #ifdef SHOW_TIME
   END("conv2d")
