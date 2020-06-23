@@ -2,6 +2,7 @@
 
 #include "util.h"
 
+#include <immintrin.h> // include vector
 #include <omp.h>
 
 #include <string>
@@ -12,6 +13,28 @@
 #define START double st = get_time();
 #define END(x) double et = get_time(); printf("\n%s! (%lf s)", x, et - st);
 
+#define VECTOR_SIZE 256
+#define TYPE float
+#if VECTOR_SIZE == 256
+  #define VECTOR_TYPE __m256
+  #define VECTOR_LOAD(x) _mm256_loadu_ps(x)
+  #define VECTOR_STORE(x, y) _mm256_storeu_ps((x), (y))
+  #define VECTOR_ADD(x, y) _mm256_add_ps((x), (y))
+  #define VECTOR_MUL(x, y) _mm256_mul_ps((x), (y))
+  #define VECTOR_SUB(x, y) _mm256_sub_ps((x), (y))
+  #define VECTOR_DIV(x, y) _mm256_div_ps((x), (y))
+  #define VECTOR_SET1(x) _mm256_set1_ps((x))
+#elif VECTOR_TYPE == 128
+  #define VECTOR_TYPE __m128
+  #define VECTOR_LOAD(x) _mm_loadu_ps(x)
+  #define VECTOR_STORE(x, y) _mm_storeu_ps((x), (y))
+  #define VECTOR_ADD(x, y) _mm_add_ps((x), (y))
+  #define VECTOR_MUL(x, y) _mm_mul_ps((x), (y))
+  #define VECTOR_SUB(x, y) _mm_sub_ps((x), (y))
+  #define VECTOR_DIV(x, y) _mm_div_ps((x), (y))
+  #define VECTOR_SET1(x) _mm_set1_ps((x))
+#endif
+#define NUMBER_OF_VEC (VECTOR_SIZE / (sizeof(TYPE) * 8))
 #define LOG2S(k, s) { size_t t = k; while (t >>= 1) s++; }
 
 int num_threads = 16;
