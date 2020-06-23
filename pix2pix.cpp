@@ -395,11 +395,12 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
   LOG2S(OH, OH_p);
   LOG2S(OW, OW_p);
   const size_t OWK_p = OW_p + K_p;
-  for (size_t ohowk = 0; ohowk < OH * OW * K; ++ohowk) {
+  const size_t OHOWK = OH * OW * K;
+  for (size_t ohowk = 0; ohowk < OHOWK; ohowk += NUMBER_OF_VEC) {
     size_t oh = ohowk >> OWK_p;
     size_t ow = (ohowk >> K_p) & ((1 << OW_p) - 1);
     size_t k = (ohowk) & ((1 << K_p) - 1);
-    float x = bias.buf[k];
+    VECTOR_TYPE x = VECTOR_LOAD(bias.buf + k);
     for (size_t r = 0; r < R; ++r) {
       for (size_t s = 0; s < S; ++s) {
         for (size_t c = 0; c < C; ++c) {
@@ -409,13 +410,14 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
           if (ih < 0 || ih >= H || iw < 0 || iw >= W) continue;
           float ii = input.buf[ih * W * C + iw * C + c];
           // filter (r, s, c, k)
-          float ff = filter.buf[r * S * C * K + s * C * K + c * K + k];
-          x += ii * ff;
+          x = VECTOR_ADD(x,
+              VECTOR_MUL(VECTOR_SET1(ii),
+                VECTOR_LOAD(filter.buf + (r * S * C * K + s * C * K + c * K + k))));
         }
       }
     }
     // output (oh, ow, k)
-    output.buf[oh * OW * K + ow * K + k] = x;
+    VECTOR_STORE(output.buf + (oh * OW * K + ow * K + k), x);
   }
   #ifdef SHOW_TIME
   END("conv2d")
