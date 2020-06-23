@@ -387,7 +387,6 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
   #ifdef SHOW_TIME
   START
   #endif
-  // printf("conv2d : K %lu OH %lu OW %lu total %lu R %lu S %lu C %lu\n", K, OH, OW, K * OH * OW, R, S, C);
   size_t K_p = 0;
   size_t OH_p = 0;
   size_t OW_p = 0;
@@ -441,31 +440,39 @@ void conv2d_transposed(Tensor input, Tensor filter, Tensor bias, Tensor &output)
   #ifdef SHOW_TIME
   START
   #endif
-  // printf("conv2d_transposed : K %lu OH %lu OW %lu total %lu R %lu S %lu C %lu\n", K, OH, OW, K * OH * OW, R, S, C);
   const size_t OWK = OW * K;
-  for (size_t ohowk = 0; ohowk < OH * OW * K; ++ohowk) {
+  const size_t OHOWK = OH * OW * K;
+
+  float HOLDER[NUMBER_OF_VEC] = {0, };
+  for (size_t ohowk = 0; ohowk < OHOWK; ++ohowk) {
     size_t oh = ohowk / OWK;
     size_t ow = ohowk / K % OW;
     size_t k = ohowk % K;
-    float x = bias.buf[k];
+    VECTOR_TYPE x = VECTOR_SET1(0);
     for (size_t r = 0; r < R; ++r) {
       for (size_t s = 0; s < S; ++s) {
-        for (size_t c = 0; c < C; ++c) {
-          // input ((oh - r + pad) / stride, (ow - s + pad) / stride, c)
-          //   where (oh - r + pad) % stride == 0 && (ow - s + pad) % stride == 0
-          if ((oh - r + pad) % stride != 0 || (ow - s + pad) % stride != 0) continue;
-          size_t ih = (oh - r + pad) / stride;
-          size_t iw = (ow - s + pad) / stride;
-          if (ih < 0 || ih >= H || iw < 0 || iw >= W) continue;
-          float ii = input.buf[ih * W * C + iw * C + c];
+        // input ((oh - r + pad) / stride, (ow - s + pad) / stride, c)
+        //   where (oh - r + pad) % stride == 0 && (ow - s + pad) % stride == 0
+        if ((oh - r + pad) % stride != 0 || (ow - s + pad) % stride != 0) continue;
+        size_t ih = (oh - r + pad) / stride;
+        size_t iw = (ow - s + pad) / stride;
+        if (ih < 0 || ih >= H || iw < 0 || iw >= W) continue;
+        for (size_t c = 0; c < C; c += NUMBER_OF_VEC) {
           // filter (r, s, k, c)
-          float ff = filter.buf[r * S * K * C + s * K * C + k * C + c];
-          x += ii * ff;
+          x = VECTOR_ADD(x, VECTOR_MUL(
+            VECTOR_LOAD(input.buf + (ih * W * C + iw * C + c)),
+            VECTOR_LOAD(filter.buf + (r * S * K * C + s * K * C + k * C + c))
+          ));
         }
       }
     }
     // output (oh, ow, k)
-    output.buf[oh * OW * K + ow * K + k] = x;
+    float r = 0.0f;
+    VECTOR_STORE(HOLDER, x);
+    for (size_t i = 0; i < NUMBER_OF_VEC; ++i) {
+      r += HOLDER[i];
+    }
+    output.buf[ohowk] = r + bias.buf[k];
   }
   #ifdef SHOW_TIME
   END("conv2d_transposed")
