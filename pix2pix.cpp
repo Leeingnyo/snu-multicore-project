@@ -568,8 +568,7 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
   #ifdef SHOW_TIME
   START_RE
   #endif
-  // printf("%lu %lu %lu\n", OH, OW, K);
-  size_t gws[1] = {OH * OW * K}, lws[1] = {1};
+  size_t gws[1] = {OH * OW * K}, lws[1] = {8};
   for (int i = 0; i < 1; ++i) {
     gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
   }
@@ -655,13 +654,7 @@ void conv2d_transposed(Tensor input, Tensor filter, Tensor bias, Tensor &output)
   int OW_ = OW;
   int stride_ = stride;
   int pad_ = pad;
-
-  size_t K_p = 0;
-  size_t OW_p = 0;
-  LOG2S(K, K_p);
-  LOG2S(OW, OW_p);
-  const size_t K_mask = ((1 << K_p) - 1);
-  const size_t OW_mask = ((1 << OW_p) - 1);
+  int OWK = OW * K;
 
   for (int d = 0; d < DEVICE_NUM; d++) {
     err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 0, sizeof(cl_mem), &input_d[d]);
@@ -692,13 +685,7 @@ void conv2d_transposed(Tensor input, Tensor filter, Tensor bias, Tensor &output)
     CHECK_ERROR(err);
     err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 13, sizeof(int), &pad_);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 14, sizeof(int), &K_p);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 15, sizeof(int), &OW_p);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 16, sizeof(int), &K_mask);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 17, sizeof(int), &OW_mask);
+    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 14, sizeof(int), &OWK);
     CHECK_ERROR(err);
   }
 
@@ -714,14 +701,14 @@ void conv2d_transposed(Tensor input, Tensor filter, Tensor bias, Tensor &output)
   #ifdef SHOW_TIME
   START_RE
   #endif
-  size_t gws[3] = {OH, OW, K}, lws[3] = {1, 1, 1};
-  for (int i = 0; i < 3; ++i) {
+  size_t gws[1] = {OH * OW * K}, lws[1] = {1};
+  for (int i = 0; i < 1; ++i) {
     gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
   }
 
   // Run kernel
   for (int d = 0; d < DEVICE_NUM; d++) {
-    err = clEnqueueNDRangeKernel(queue[d], kernel[d][K_CONV2D_TRANSPOSED], 3, NULL, gws, lws, 0, NULL, NULL);
+    err = clEnqueueNDRangeKernel(queue[d], kernel[d][K_CONV2D_TRANSPOSED], 1, NULL, gws, lws, 0, NULL, NULL);
     CHECK_ERROR(err);
   }
   #ifdef SHOW_TIME

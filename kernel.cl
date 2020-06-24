@@ -74,9 +74,9 @@ __kernel void conv2d_transposed(
   int OH, int OW, // 아웃풋 크기
   int stride, // 스트라이드
   int pad, // 패드
-  int K_p, OW_p,
-  int K_mask, OW_mask
+  int OWK
 ) {
+  /*
   int i = get_global_id(0); // OH
   int j = get_global_id(1); // OW
   int k = get_global_id(2); // K
@@ -88,8 +88,13 @@ __kernel void conv2d_transposed(
   int gi = get_group_id(0); // OH
   int gj = get_group_id(1); // OW
   int gk = get_group_id(2); // K
+  */
 
-  int idx = i * OW * K + j * K + k;
+  // int idx = i * OW * K + j * K + k;
+  int idx = get_global_id(0);
+  int i = idx / OWK;
+  int j = idx / K % OW;
+  int k = idx % K;
   float x = 0.0f;
 
   for (int r = 0; r < R; ++r) {
