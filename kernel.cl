@@ -27,9 +27,12 @@ __kernel void conv2d(
   int R, int S, int K, // filter 크기
   int OH, int OW, // 아웃풋 크기
   int stride, // 스트라이드
-  int pad // 패드
+  int pad, // 패드
+  int K_p, OW_p,
+  int K_mask, OW_mask
 ) {
   // 아웃이 잘 해서 잘 한다
+  /*
   int i = get_global_id(0); // OH
   int j = get_global_id(1); // OW
   int k = get_global_id(2); // K
@@ -41,8 +44,13 @@ __kernel void conv2d(
   int gi = get_group_id(0); // OH
   int gj = get_group_id(1); // OW
   int gk = get_group_id(2); // K
+  */
 
-  int idx = i * OW * K + j * K + k;
+  // int idx = i * OW * K + j * K + k;
+  int idx = get_global_id(0);
+  int i = idx >> (OW_p + K_p);
+  int j = (idx >> K_p) & OW_mask;
+  int k = idx & K_mask;
   float x = bias[k];
 
   for (int r = 0; r < R; ++r) {
