@@ -187,7 +187,7 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
   // Declare feature maps
   // Memory for feature maps are allocated when they are written first time using Tensor::alloc_once(...)
 
-  #pragma omp parallel for num_threads(num_threads)
+  // #pragma omp parallel for num_threads(num_threads)
   for (size_t img_idx = 0; img_idx < num_image; ++img_idx) {
     Tensor one_image;
     Tensor encoder_layer_input[9];
@@ -476,41 +476,100 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
   #ifdef SHOW_TIME
   START
   #endif
-  size_t K_p = 0;
-  size_t OH_p = 0;
-  size_t OW_p = 0;
-  LOG2S(K, K_p);
-  LOG2S(OH, OH_p);
-  LOG2S(OW, OW_p);
-  const size_t OWK_p = OW_p + K_p;
-  const size_t OHOWK = OH * OW * K;
-  for (size_t ohowk = 0; ohowk < OHOWK; ohowk += NUMBER_OF_VEC) {
-    size_t oh = ohowk >> OWK_p;
-    size_t ow = (ohowk >> K_p) & ((1 << OW_p) - 1);
-    size_t k = (ohowk) & ((1 << K_p) - 1);
-    VECTOR_TYPE x = VECTOR_LOAD(bias.buf + k);
-    for (size_t r = 0; r < R; ++r) {
-      for (size_t s = 0; s < S; ++s) {
-        // input (oh * stride - pad + r, ow * stride - pad + s, c)
-        size_t ih = oh * stride - pad + r;
-        size_t iw = ow * stride - pad + s;
-        if (ih < 0 || ih >= H || iw < 0 || iw >= W) continue;
-        for (size_t c = 0; c < C; ++c) {
-          float ii = input.buf[ih * W * C + iw * C + c];
-          // filter (r, s, c, k)
-          x = VECTOR_ADD(x,
-              VECTOR_MUL(VECTOR_SET1(ii),
-                VECTOR_LOAD(filter.buf + (r * S * C * K + s * C * K + c * K + k))));
-        }
-      }
-    }
-    // output (oh, ow, k)
-    VECTOR_STORE(output.buf + ohowk, x);
+  cl_mem input_d[DEVICE_NUM], filter_d[DEVICE_NUM], bias_d[DEVICE_NUM], output_d[DEVICE_NUM];
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    input_d[d] = clCreateBuffer(context[d], CL_MEM_READ_WRITE, input.sz * sizeof(float), NULL, &err);
+    CHECK_ERROR(err);
+    filter_d[d] = clCreateBuffer(context[d], CL_MEM_READ_WRITE, filter.sz * sizeof(float), NULL, &err);
+    CHECK_ERROR(err);
+    bias_d[d] = clCreateBuffer(context[d], CL_MEM_READ_WRITE, bias.sz * sizeof(float), NULL, &err);
+    CHECK_ERROR(err);
+    output_d[d] = clCreateBuffer(context[d], CL_MEM_READ_WRITE, output.sz * sizeof(float), NULL, &err);
+    CHECK_ERROR(err);
+  }
+
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    err = clEnqueueWriteBuffer(queue[d], input_d[d], CL_TRUE, 0, input.sz * sizeof(float), input.buf, 0, NULL, NULL);
+    CHECK_ERROR(err);
+    err = clEnqueueWriteBuffer(queue[d], filter_d[d], CL_TRUE, 0, filter.sz * sizeof(float), filter.buf, 0, NULL, NULL);
+    CHECK_ERROR(err);
+    err = clEnqueueWriteBuffer(queue[d], bias_d[d], CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
+    CHECK_ERROR(err);
+  }
+
+  int H_ = H;
+  int W_ = W;
+  int C_ = C;
+  int R_ = R;
+  int S_ = S;
+  int K_ = K;
+  int OH_ = OH;
+  int OW_ = OW;
+  int stride_ = stride;
+  int pad_ = pad;
+
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    err = clSetKernelArg(kernel[d][K_CONV2D], 0, sizeof(cl_mem), &input_d[d]);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 1, sizeof(cl_mem), &filter_d[d]);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 2, sizeof(cl_mem), &bias_d[d]);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 3, sizeof(cl_mem), &output_d[d]);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 4, sizeof(int), &H_);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 5, sizeof(int), &W_);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 6, sizeof(int), &C_);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 7, sizeof(int), &R_);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 8, sizeof(int), &S_);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 9, sizeof(int), &K_);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 10, sizeof(int), &OH_);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 11, sizeof(int), &OW_);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 12, sizeof(int), &stride_);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel[d][K_CONV2D], 13, sizeof(int), &pad_);
+    CHECK_ERROR(err);
   }
   #ifdef SHOW_TIME
-  END("conv2d")
+  END("conv2d write buffer")
   #endif
-  // PROJECT - USE CPU/GPU MULTITHREAD TO CALCULATE
+
+  #ifdef SHOW_TIME
+  START_RE
+  #endif
+  size_t gws[3] = {OH, OW, K}, lws[3] = {1, 1, 1};
+  for (int i = 0; i < 3; ++i) {
+    gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+  }
+
+  // Run kernel
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    err = clEnqueueNDRangeKernel(queue[d], kernel[d][K_CONV2D], 3, NULL, gws, lws, 0, NULL, NULL);
+    CHECK_ERROR(err);
+  }
+  #ifdef SHOW_TIME
+  END_RE("conv2d")
+  #endif
+
+  #ifdef SHOW_TIME
+  START_RE
+  #endif
+  // write
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    err = clEnqueueReadBuffer(queue[d], output_d[d], CL_TRUE, 0, output.sz * sizeof(float), output.buf, 0, NULL, NULL);
+    CHECK_ERROR(err);
+  }
+  #ifdef SHOW_TIME
+  END_RE("conv2d read buffer")
+  #endif
 }
 
 // Transposed convolution (2-dimension, stride = 2, pad = 1)
