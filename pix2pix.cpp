@@ -568,7 +568,7 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
   #ifdef SHOW_TIME
   START_RE
   #endif
-  size_t gws[1] = {OH * OW * K}, lws[1] = {8};
+  size_t gws[1] = {OH * OW * K}, lws[1] = {128};
   for (int i = 0; i < 1; ++i) {
     gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
   }
@@ -701,7 +701,7 @@ void conv2d_transposed(Tensor input, Tensor filter, Tensor bias, Tensor &output)
   #ifdef SHOW_TIME
   START_RE
   #endif
-  size_t gws[1] = {OH * OW * K}, lws[1] = {1};
+  size_t gws[1] = {OH * OW * K}, lws[1] = {128};
   for (int i = 0; i < 1; ++i) {
     gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
   }
