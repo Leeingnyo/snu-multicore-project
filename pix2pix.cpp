@@ -8,6 +8,7 @@
 #include <string>
 #include <map>
 #include <cmath>
+#include <cstring>
 
 // #define SHOW_TIME
 #define START double st = get_time();
@@ -527,35 +528,64 @@ void batchnorm(Tensor input, Tensor scale, Tensor offset, Tensor &output) {
   #ifdef SHOW_TIME
   START
   #endif
+  float sum[C];
+  memset(sum, 0, C * sizeof(float));
+  for (size_t h = 0; h < H; ++h) {
+    for (size_t w = 0; w < W; ++w) {
+      const int base = h * W * C + w * C;
+      for (size_t c = 0; c < C; c += NUMBER_OF_VEC) {
+        VECTOR_TYPE x = VECTOR_LOAD(sum + c);
+        VECTOR_STORE(sum + c, VECTOR_ADD(x, VECTOR_LOAD(input.buf + (base + c))));
+      }
+    }
+  }
+  float mean[C];
+  VECTOR_TYPE divider = VECTOR_SET1((H * W));
+  for (size_t c = 0; c < C; c += NUMBER_OF_VEC) {
+    VECTOR_STORE(mean + c, VECTOR_DIV(VECTOR_LOAD(sum + c), divider));
+  }
+
+  float sqsum[C];
+  memset(sqsum, 0, C * sizeof(float));
+  for (size_t h = 0; h < H; ++h) {
+    for (size_t w = 0; w < W; ++w) {
+      const int base = h * W * C + w * C;
+      for (size_t c = 0; c < C; c += NUMBER_OF_VEC) {
+        VECTOR_TYPE delta = VECTOR_SUB(VECTOR_LOAD(input.buf + (base + c)), VECTOR_LOAD(mean + c));
+        VECTOR_TYPE x = VECTOR_LOAD(sqsum + c);
+        VECTOR_STORE(sqsum + c, VECTOR_ADD(x, VECTOR_MUL(delta, delta)));
+      }
+    }
+  }
+  float variance[C];
+  for (size_t c = 0; c < C; c += NUMBER_OF_VEC) {
+    VECTOR_STORE(variance + c, VECTOR_DIV(VECTOR_LOAD(sqsum + c), divider));
+  }
+
+  const float epsilon = 1e-5;
+  float sqrtf_variance[C];
   for (size_t c = 0; c < C; ++c) {
-    float sum = 0;
-    for (size_t h = 0; h < H; ++h) {
-      for (size_t w = 0; w < W; ++w) {
-        float ii = input.buf[h * W * C + w * C + c];
-        sum += ii;
-      }
-    }
-    // PROJECT - USE CPU MULTITHREAD TO CALCULATE reduction
-    float mean = sum / (H * W);
+    sqrtf_variance[c] = sqrtf(variance[c] + epsilon);
+  }
 
-    float sqsum = 0;
-    for (size_t h = 0; h < H; ++h) {
-      for (size_t w = 0; w < W; ++w) {
-        float ii = input.buf[h * W * C + w * C + c];
-        sqsum += (ii - mean) * (ii - mean);
+  for (size_t h = 0; h < H; ++h) {
+    for (size_t w = 0; w < W; ++w) {
+      size_t base = h * W * C + w * C;
+      for (size_t c = 0; c < C; c += NUMBER_OF_VEC) {
+        VECTOR_STORE(output.buf + (base + c),
+          VECTOR_ADD(
+            VECTOR_LOAD(offset.buf + c),
+            VECTOR_DIV(
+              VECTOR_MUL(
+                VECTOR_SUB(VECTOR_LOAD(input.buf + (base + c)), VECTOR_LOAD(mean + c)),
+                VECTOR_LOAD(scale.buf + c)
+              ),
+              VECTOR_LOAD(sqrtf_variance + c)
+            )
+          )
+        );
       }
     }
-    // PROJECT - USE CPU MULTITHREAD TO CALCULATE reduction
-    float variance = sqsum / (H * W);
-
-    const float epsilon = 1e-5;
-    for (size_t h = 0; h < H; ++h) {
-      for (size_t w = 0; w < W; ++w) {
-        size_t idx = h * W * C + w * C + c;
-        output.buf[idx] = offset.buf[c] + (input.buf[idx] - mean) * scale.buf[c] / sqrtf(variance + epsilon);
-      }
-    }
-    // PROJECT - USE CPU MULTITHREAD TO CALCULATE
   }
   #ifdef SHOW_TIME
   END("batchnorm")
