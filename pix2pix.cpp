@@ -4,6 +4,8 @@
 
 #include <immintrin.h> // include vector
 #include <omp.h>
+#include <CL/cl.h>
+#include <mpi.h>
 
 #include <string>
 #include <map>
@@ -12,6 +14,8 @@
 // #define SHOW_TIME
 #define START double st = get_time();
 #define END(x) double et = get_time(); printf("\n%s! (%lf s)", x, et - st);
+#define START_RE st = get_time();
+#define END_RE(x) et = get_time(); printf("\n%s! (%lf s)", x, et - st);
 
 #define VECTOR_SIZE 256
 #define TYPE float
@@ -36,6 +40,27 @@
 #endif
 #define NUMBER_OF_VEC (VECTOR_SIZE / (sizeof(TYPE) * 8))
 #define LOG2S(k, s) { size_t t = k; while (t >>= 1) s++; }
+
+#define CHECK_ERROR(err) \
+  if (err != CL_SUCCESS) { \
+    printf("[%s:%d] OpenCL error %d\n", __FILE__, __LINE__, err); \
+    exit(EXIT_FAILURE); \
+  }
+
+#define TILE_SIZE 28
+#define PADDING(x, y) (((x)-1)/(y)*(y)+(y))
+
+#define DEVICE_NUM 1
+#define KERNEL_NUM 1
+
+static cl_int err;
+static cl_platform_id platform;
+static cl_device_id device[DEVICE_NUM];
+static cl_context context[DEVICE_NUM];
+static cl_command_queue queue[DEVICE_NUM];
+static cl_program program[DEVICE_NUM];
+static cl_kernel kernel[DEVICE_NUM][KERNEL_NUM];
+enum kernel_type { K_CONV2D, };
 
 int num_threads = 16;
 
@@ -74,12 +99,76 @@ static void batchnorm(Tensor input, Tensor scale, Tensor offset, Tensor &output)
 static void concat(Tensor input0, Tensor input1, Tensor &output);
 static void elem_tanh(Tensor input, Tensor &output);
 
+static cl_program create_and_build_program_with_source(cl_context context, cl_device_id device, const char *file_name) {
+  FILE *file = fopen(file_name, "rb");
+  if (file == NULL) {
+    printf("Failed to open %s\n", file_name);
+    exit(EXIT_FAILURE);
+  }
+  fseek(file, 0, SEEK_END);
+  size_t source_size = ftell(file);
+  rewind(file);
+  char *source_code = (char*)malloc(source_size + 1);
+  fread(source_code, sizeof(char), source_size, file);
+  source_code[source_size] = '\0';
+  fclose(file);
+  cl_program program = clCreateProgramWithSource(context, 1, (const char **)&source_code, &source_size, &err);
+  CHECK_ERROR(err);
+  free(source_code);
+  err = clBuildProgram(program, 1, &device, "", NULL, NULL);
+  if (err == CL_BUILD_PROGRAM_FAILURE) {
+    size_t log_size;
+    CHECK_ERROR(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size));
+    char *log = (char*)malloc(log_size + 1);
+    CHECK_ERROR(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, log_size, log, NULL));
+    log[log_size] = 0;
+    printf("Compile error:\n%s\n", log);
+    free(log);
+  }
+  CHECK_ERROR(err);
+  return program;
+}
+
 void pix2pix_init() {
   /*
    * You can do input-independent and input-size-independent jobs here.
    * e.g., Getting OpenCL platform, Compiling OpenCL kernel, ...
    * Execution time of this function is not measured, so do as much as possible!
    */
+
+  // platform
+  err = clGetPlatformIDs(1, &platform, NULL);
+  CHECK_ERROR(err);
+
+  // device
+  err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, DEVICE_NUM, device, NULL);
+  CHECK_ERROR(err);
+
+  // context
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    context[d] = clCreateContext(NULL, 1, &device[d], NULL, NULL, &err);
+    CHECK_ERROR(err);
+  }
+
+  // command queue
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    queue[d] = clCreateCommandQueue(context[d], device[d], 0, &err);
+    CHECK_ERROR(err);
+  }
+
+  // program
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    program[d] = create_and_build_program_with_source(context[d], device[d], "kernel.cl");
+  }
+
+  // kernel
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    kernel[d][K_CONV2D] = clCreateKernel(program[d], "conv2d", &err);
+    CHECK_ERROR(err);
+  }
+
+  // alloc buffers
+  // alloc mpi buffers
 }
 
 void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t num_image) {
