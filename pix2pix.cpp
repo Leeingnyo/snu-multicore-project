@@ -62,7 +62,7 @@ static cl_program program[DEVICE_NUM];
 static cl_kernel kernel[DEVICE_NUM][KERNEL_NUM];
 enum kernel_type { K_CONV2D, };
 
-int num_threads = 16;
+int num_threads = 4;
 
 class Tensor {
 public:
@@ -187,7 +187,7 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
   // Declare feature maps
   // Memory for feature maps are allocated when they are written first time using Tensor::alloc_once(...)
 
-  // #pragma omp parallel for num_threads(num_threads)
+  #pragma omp parallel for num_threads(num_threads)
   for (size_t img_idx = 0; img_idx < num_image; ++img_idx) {
     Tensor one_image;
     Tensor encoder_layer_input[9];
