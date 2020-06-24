@@ -388,17 +388,17 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
   START
   #endif
   size_t K_p = 0;
-  size_t OH_p = 0;
   size_t OW_p = 0;
   LOG2S(K, K_p);
-  LOG2S(OH, OH_p);
   LOG2S(OW, OW_p);
   const size_t OWK_p = OW_p + K_p;
   const size_t OHOWK = OH * OW * K;
+  const size_t K_mask = ((1 << K_p) - 1);
+  const size_t OW_mask = ((1 << OW_p) - 1);
   for (size_t ohowk = 0; ohowk < OHOWK; ohowk += NUMBER_OF_VEC) {
     size_t oh = ohowk >> OWK_p;
-    size_t ow = (ohowk >> K_p) & ((1 << OW_p) - 1);
-    size_t k = (ohowk) & ((1 << K_p) - 1);
+    size_t ow = (ohowk >> K_p) & OW_mask;
+    size_t k = ohowk & K_mask;
     VECTOR_TYPE x = VECTOR_LOAD(bias.buf + k);
     for (size_t r = 0; r < R; ++r) {
       for (size_t s = 0; s < S; ++s) {
