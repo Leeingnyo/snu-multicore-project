@@ -12,6 +12,7 @@
 #include <cmath>
 
 // #define SHOW_TIME
+// #define FINISH
 #define START double st = get_time();
 #define END(x) double et = get_time(); printf("\n%s! (%lf s)", x, et - st);
 #define START_RE st = get_time();
@@ -553,6 +554,12 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
     err = clSetKernelArg(kernel[d][K_CONV2D], 17, sizeof(int), &OW_mask);
     CHECK_ERROR(err);
   }
+
+  #ifdef FINISH
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    clFinish(queue[d]);
+  }
+  #endif
   #ifdef SHOW_TIME
   END("conv2d write buffer")
   #endif
@@ -571,6 +578,12 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
     err = clEnqueueNDRangeKernel(queue[d], kernel[d][K_CONV2D], 1, NULL, gws, lws, 0, NULL, NULL);
     CHECK_ERROR(err);
   }
+
+  #ifdef FINISH
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    clFinish(queue[d]);
+  }
+  #endif
   #ifdef SHOW_TIME
   END_RE("conv2d")
   #endif
@@ -583,6 +596,12 @@ void conv2d(Tensor input, Tensor filter, Tensor bias, Tensor &output) {
     err = clEnqueueReadBuffer(queue[d], output_d[d], CL_TRUE, 0, output.sz * sizeof(float), output.buf, 0, NULL, NULL);
     CHECK_ERROR(err);
   }
+
+  #ifdef FINISH
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    clFinish(queue[d]);
+  }
+  #endif
   #ifdef SHOW_TIME
   END_RE("conv2d read buffer")
   #endif
