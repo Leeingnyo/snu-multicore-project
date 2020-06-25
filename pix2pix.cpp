@@ -491,6 +491,7 @@ void pix2pix_iter(
       START_RE
       #endif
       auto filter = weights["generator/encoder_1/conv2d/kernel"];
+      auto bias = weights["generator/encoder_1/conv2d/bias"];
 
       if (!weight_buffers_bound[device_num]["generator/encoder_1/conv2d/kernel"]) {
         weight_buffers[device_num]["generator/encoder_1/conv2d/kernel"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, filter.sz * sizeof(float), NULL, &err);
@@ -501,7 +502,6 @@ void pix2pix_iter(
         weight_buffers_bound[device_num]["generator/encoder_1/conv2d/kernel"] = true;
       }
       if (!weight_buffers_bound[device_num]["generator/encoder_1/conv2d/bias"]) {
-        auto bias = weights["generator/encoder_1/conv2d/bias"];
         weight_buffers[device_num]["generator/encoder_1/conv2d/bias"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, bias.sz * sizeof(float), NULL, &err);
         cl_mem &bias_mem = weight_buffers[device_num]["generator/encoder_1/conv2d/bias"];
         CHECK_ERROR(err);
@@ -706,6 +706,9 @@ void pix2pix_iter(
     // Last decoder does not have batchnorm
     if (i == 1) continue;
 
+    #ifdef SHOW_TIME
+    START_RE
+    #endif
     auto scale = weights[scope + "/batch_normalization/gamma"];
     auto offset = weights[scope + "/batch_normalization/beta"];
 
@@ -726,6 +729,12 @@ void pix2pix_iter(
       CHECK_ERROR(err);
       weight_buffers_bound[device_num][scope + "/batch_normalization/beta"] = true;
     }
+    #ifdef FINISH
+    clFinish(queue[device_num]);
+    #endif
+    #ifdef SHOW_TIME
+    END_RE("write scale offset")
+    #endif
 
     cl_mem mean_mem = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, C_ * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
