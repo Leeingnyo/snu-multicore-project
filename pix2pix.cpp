@@ -52,7 +52,7 @@
 #define PADDING(x, y) (((x)-1)/(y)*(y)+(y))
 
 #define DEVICE_NUM 1
-#define KERNEL_NUM 12
+#define KERNEL_NUM 8
 
 static cl_int err;
 static cl_platform_id platform;
@@ -61,7 +61,7 @@ static cl_context context[DEVICE_NUM];
 static cl_command_queue queue[DEVICE_NUM];
 static cl_program program[DEVICE_NUM];
 static cl_kernel kernel[DEVICE_NUM][KERNEL_NUM];
-enum kernel_type { K_CONV2D, K_CONV2D_TRANSPOSED, K_CONV2D_LEAKYRELU, K_CONV2D_BATCHNORM_LEAKYRELU, K_MEAN, K_VARIANCE, K_BATCHNORM, K_BATCHNORM_LEAKYRELU, K_LEAKYRELU, K_CONCAT, TANH };
+enum kernel_type { K_CONV2D, K_CONV2D_TRANSPOSED, K_MEAN, K_VARIANCE, K_BATCHNORM, K_LEAKYRELU, K_CONCAT, TANH };
 
 int num_threads = 4;
 
@@ -172,12 +172,9 @@ void pix2pix_init() {
   for (int d = 0; d < DEVICE_NUM; d++) {
     kernel[d][K_CONV2D] = clCreateKernel(program[d], "conv2d", &err);
     kernel[d][K_CONV2D_TRANSPOSED] = clCreateKernel(program[d], "conv2d_transposed", &err);
-    kernel[d][K_CONV2D_LEAKYRELU] = clCreateKernel(program[d], "conv2d_leakyrelu", &err);
-    kernel[d][K_CONV2D_BATCHNORM_LEAKYRELU] = clCreateKernel(program[d], "conv2d_batchnorm_leakyrelu", &err);
     kernel[d][K_MEAN] = clCreateKernel(program[d], "mean", &err);
     kernel[d][K_VARIANCE] = clCreateKernel(program[d], "variance", &err);
     kernel[d][K_BATCHNORM] = clCreateKernel(program[d], "batchnorm", &err);
-    kernel[d][K_BATCHNORM_LEAKYRELU] = clCreateKernel(program[d], "batchnorm_leakyrelu", &err);
     kernel[d][K_LEAKYRELU] = clCreateKernel(program[d], "leakyrelu", &err);
     kernel[d][K_CONCAT] = clCreateKernel(program[d], "concat", &err);
     CHECK_ERROR(err);
