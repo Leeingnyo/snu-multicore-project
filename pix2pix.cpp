@@ -61,7 +61,7 @@ static cl_context context[DEVICE_NUM];
 static cl_command_queue queue[DEVICE_NUM];
 static cl_program program[DEVICE_NUM];
 static cl_kernel kernel[DEVICE_NUM][KERNEL_NUM];
-enum kernel_type { K_CONV2D, K_CONV2D_TRANSPOSED, K_MEAN, K_VARIANCE, K_BATCHNORM, K_LEAKYRELU, K_CONCAT, TANH };
+enum kernel_type { K_CONV2D, K_CONV2D_TRANSPOSED, K_MEAN, K_VARIANCE, K_BATCHNORM, K_LEAKYRELU, K_CONCAT, K_TANH };
 
 int num_threads = 4;
 
@@ -100,6 +100,7 @@ static void elem_tanh(Tensor input, Tensor &output);
 void pix2pix_iter(int device_num, Tensor one_image, Tensor &encoded, std::map<std::string, Tensor> &weights);
 void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, cl_mem &filter_mem, cl_mem &bias_mem, size_t &H, size_t &W, size_t &C, size_t R, size_t S, size_t K);
 void leakyrelu(int device_num, cl_mem &input, cl_mem &output, float alpha, size_t H, size_t W, size_t C);
+void tanh_kernel(int device_num, cl_mem &input, cl_mem &output, size_t H, size_t W, size_t C);
 void mean_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, size_t &H, size_t &W, size_t &C);
 void variance_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, size_t H, size_t W, size_t C);
 void batchnorm_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, cl_mem &output, cl_mem &offset_mem, cl_mem &scale_mem, size_t H, size_t W, size_t C);
@@ -181,6 +182,7 @@ void pix2pix_init() {
     kernel[d][K_BATCHNORM] = clCreateKernel(program[d], "batchnorm", &err);
     kernel[d][K_LEAKYRELU] = clCreateKernel(program[d], "leakyrelu", &err);
     kernel[d][K_CONCAT] = clCreateKernel(program[d], "concat", &err);
+    kernel[d][K_TANH] = clCreateKernel(program[d], "elem_tanh", &err);
     CHECK_ERROR(err);
   }
 
@@ -222,7 +224,6 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
   // #pragma omp parallel for num_threads(num_threads)
   for (size_t img_idx = 0; img_idx < num_image; ++img_idx) {
     Tensor one_image;
-    Tensor decoder_layer[1];
 
     // Pick 1 image out of num_image
     get_one_image(input, one_image, img_idx);
@@ -233,11 +234,8 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
     Tensor processed;
     pix2pix_iter(0, one_image, processed, weights);
 
-    // Convert values into [-1, 1] using tanh function
-    elem_tanh(processed, decoder_layer[0]);
-
     // Put a image into output buffer
-    postprocess_one_image(decoder_layer[0], output_buf, img_idx);
+    postprocess_one_image(processed, output_buf, img_idx);
   }
 }
 
@@ -413,9 +411,6 @@ void postprocess_one_image(Tensor input, uint8_t *out, size_t idx) {
   #ifdef SHOW_TIME
   END("postprocess_one_image")
   #endif
-  // PROJECT - USE CPU MULTITHREAD TO CALCULATE
-  // CPU
-  // Caching
 }
 
 // Pick single image from images
@@ -756,19 +751,14 @@ void pix2pix_iter(
     clReleaseMemObject(mean_mem);
     clReleaseMemObject(variance_mem);
   }
-    /*
-    // Convert values into [-1, 1] using tanh function
-    elem_tanh(decoder_layer_convolved[1], decoder_layer[1]);
 
-    // Put a image into output buffer
-    postprocess_one_image(decoder_layer[1], output_buf, img_idx);
-    */
+  tanh_kernel(device_num, B[device_num], A[device_num], H_, W_, C_);
 
   #ifdef SHOW_TIME
   START_RE
   #endif
   encoded.alloc_once({H_, W_, C_});
-  err = clEnqueueReadBuffer(queue[device_num], B[device_num], CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
+  err = clEnqueueReadBuffer(queue[device_num], A[device_num], CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
   CHECK_ERROR(err);
   #ifdef FINISH
   clFinish(queue[device_num]);
@@ -861,7 +851,7 @@ void leakyrelu(int device_num, cl_mem &input, cl_mem &output, float alpha, size_
   err = clSetKernelArg(kernel[device_num][K_LEAKYRELU], 2, sizeof(float), &alpha);
   CHECK_ERROR(err);
 
-  size_t gws[1] = {H * W * C}, lws[1] = {128};
+  size_t gws[1] = {H * W * C}, lws[1] = {256};
   for (int i = 0; i < 1; ++i) {
     gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
   }
@@ -873,6 +863,31 @@ void leakyrelu(int device_num, cl_mem &input, cl_mem &output, float alpha, size_
   #endif
   #ifdef SHOW_TIME
   END_RE("run kernel leakyrelu")
+  #endif
+}
+
+void tanh_kernel(int device_num, cl_mem &input, cl_mem &output, size_t H, size_t W, size_t C) {
+  #ifdef SHOW_TIME
+  double st, et;
+  START_RE
+  #endif
+  err = clSetKernelArg(kernel[device_num][K_TANH], 0, sizeof(cl_mem), &input);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TANH], 1, sizeof(cl_mem), &output);
+  CHECK_ERROR(err);
+
+  size_t gws[1] = {H * W * C}, lws[1] = {256};
+  for (int i = 0; i < 1; ++i) {
+    gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+  }
+
+  err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_TANH], 1, NULL, gws, lws, 0, NULL, NULL);
+  CHECK_ERROR(err);
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
+  #ifdef SHOW_TIME
+  END_RE("run kernel tanh")
   #endif
 }
 

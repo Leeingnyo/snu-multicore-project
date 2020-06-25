@@ -181,3 +181,12 @@ __kernel void concat(
     output[idx] = input1[h * W * C1 + w * C1 + c - C0];
   }
 }
+
+__kernel void elem_tanh(
+  __global float *input,
+  __global float *output
+) {
+  int idx = get_global_id(0);
+  float x = input[idx];
+  output[idx] = tanh(x);
+}
