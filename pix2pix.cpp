@@ -1376,7 +1376,7 @@ void encoding(
       clReleaseMemObject(bias_mem);
     }
 
-    { // relu (i = 2)
+    { // leakyrelu (i = 2)
       #ifdef SHOW_TIME
       START_RE
       #endif
@@ -1406,7 +1406,7 @@ void encoding(
       clFinish(queue[device_num]);
       #endif
       #ifdef SHOW_TIME
-      END_RE("8 -> 9 run kernel batchnorm")
+      END_RE("1 -> 2 run kernel leakyrelu")
       #endif
     }
   }
@@ -1602,7 +1602,7 @@ void encoding(
       #endif
     }
 
-    { // batchnorm_relu
+    { // batchnorm
       #ifdef SHOW_TIME
       START_RE
       #endif
@@ -1615,7 +1615,7 @@ void encoding(
       float alpha = 0.2f;
 
       cl_mem &input = A;
-      cl_mem &output = B;
+      cl_mem &output = S[step];
 
       err = clSetKernelArg(kernel[device_num][K_BATCHNORM_LEAKYRELU], 0, sizeof(cl_mem), &input);
       CHECK_ERROR(err);
@@ -1645,7 +1645,41 @@ void encoding(
       clFinish(queue[device_num]);
       #endif
       #ifdef SHOW_TIME
-      END_RE("3 -> 4 run kernel batchnorm_leakyrelu")
+      END_RE("3 -> 4 run kernel batchnorm")
+      #endif
+    }
+
+    { // leakyrelu (i = step)
+      #ifdef SHOW_TIME
+      START_RE
+      #endif
+      size_t H = H_;
+      size_t W = W_;
+      size_t C = C_;
+      float alpha = 0.2f;
+
+      cl_mem &input = S[step];
+      cl_mem &output = B;
+
+      err = clSetKernelArg(kernel[device_num][K_LEAKYRELU], 0, sizeof(cl_mem), &input);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_LEAKYRELU], 1, sizeof(cl_mem), &output);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_LEAKYRELU], 2, sizeof(float), &alpha);
+      CHECK_ERROR(err);
+
+      size_t gws[1] = {H * W * C}, lws[1] = {128};
+      for (int i = 0; i < 1; ++i) {
+        gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+      }
+
+      err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_LEAKYRELU], 1, NULL, gws, lws, 0, NULL, NULL);
+      CHECK_ERROR(err);
+      #ifdef FINISH
+      clFinish(queue[device_num]);
+      #endif
+      #ifdef SHOW_TIME
+      END_RE("<step> run kernel leakyrelu")
       #endif
     }
 
@@ -1921,6 +1955,9 @@ void encoding(
   #endif
   clReleaseMemObject(A);
   clReleaseMemObject(B);
+  for (int i = 0; i < 9; i++) {
+    clReleaseMemObject(S[i]);
+  }
   #ifdef SHOW_TIME
   END_RE("release mem object")
   #endif
