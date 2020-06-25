@@ -103,7 +103,7 @@ void leakyrelu(int device_num, cl_mem &input, cl_mem &output, float alpha, size_
 void mean_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, size_t &H, size_t &W, size_t &C);
 void variance_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, size_t H, size_t W, size_t C);
 void batchnorm_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, cl_mem &output, cl_mem &offset_mem, cl_mem &scale_mem, size_t H, size_t W, size_t C);
-void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter, Tensor bias, size_t &H, size_t &W, size_t &C);
+void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, cl_mem &filter, cl_mem &bias, size_t &H, size_t &W, size_t &C, size_t R, size_t S, size_t K);
 void concat_kernel(int device_num, cl_mem &input, cl_mem &input2, cl_mem &output, int H, int W, int C0, int C1, size_t &C);
 
 static cl_program create_and_build_program_with_source(cl_context context, cl_device_id device, const char *file_name) {
@@ -668,9 +668,41 @@ void pix2pix_iter(
     }
 
     {
+      #ifdef SHOW_TIME
+      double st, et;
+      START_RE
+      #endif
+      if (!weight_buffers_bound[device_num][scope + "/conv2d_transpose/kernel"]) {
+        weight_buffers[device_num][scope + "/conv2d_transpose/kernel"] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, filter.sz * sizeof(float), NULL, &err);
+        CHECK_ERROR(err);
+        cl_mem &filter_mem = weight_buffers[device_num][scope + "/conv2d_transpose/kernel"];
+        err = clEnqueueWriteBuffer(queue[device_num], filter_mem, CL_TRUE, 0, filter.sz * sizeof(float), filter.buf, 0, NULL, NULL);
+        CHECK_ERROR(err);
+        weight_buffers_bound[device_num][scope + "/conv2d_transpose/kernel"] = true;
+      }
+
+      if (!weight_buffers_bound[device_num][scope + "/conv2d_transpose/bias"]) {
+        weight_buffers[device_num][scope + "/conv2d_transpose/bias"] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, bias.sz * sizeof(float), NULL, &err);
+        CHECK_ERROR(err);
+        cl_mem &bias_mem = weight_buffers[device_num][scope + "/conv2d_transpose/bias"];
+        err = clEnqueueWriteBuffer(queue[device_num], bias_mem, CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
+        CHECK_ERROR(err);
+        weight_buffers_bound[device_num][scope + "/conv2d_transpose/bias"] = true;
+      }
+      #ifdef FINISH
+      clFinish(queue[device_num]);
+      #endif
+      #ifdef SHOW_TIME
+      END_RE("write filter bias")
+      #endif
+
       cl_mem &input = A;
       cl_mem &output = B;
-      conv2d_transposed_kernel(device_num, input, output, filter, bias, H_, W_, C_);
+      cl_mem &filter_mem = weight_buffers[device_num][scope + "/conv2d_transpose/kernel"];
+      cl_mem &bias_mem = weight_buffers[device_num][scope + "/conv2d_transpose/bias"];
+
+      size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[3];
+      conv2d_transposed_kernel(device_num, input, output, filter_mem, bias_mem, H_, W_, C_, R, S, K);
     }
 
     // Last decoder does not have batchnorm
@@ -960,32 +992,12 @@ void batchnorm_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &v
   #endif
 }
 
-void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter, Tensor bias, size_t &H, size_t &W, size_t &C) {
-  size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[2];
+void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, cl_mem &filter_mem, cl_mem &bias_mem, size_t &H, size_t &W, size_t &C, size_t R, size_t S, size_t K) {
   const size_t stride = 2, pad = 1;
   size_t OH = H * stride, OW = W * stride;
 
   #ifdef SHOW_TIME
   double st, et;
-  START_RE
-  #endif
-  cl_mem filter_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, filter.sz * sizeof(float), NULL, &err);
-  CHECK_ERROR(err);
-  cl_mem bias_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, bias.sz * sizeof(float), NULL, &err);
-  CHECK_ERROR(err);
-
-  err = clEnqueueWriteBuffer(queue[device_num], filter_mem, CL_TRUE, 0, filter.sz * sizeof(float), filter.buf, 0, NULL, NULL);
-  CHECK_ERROR(err);
-  err = clEnqueueWriteBuffer(queue[device_num], bias_mem, CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
-  CHECK_ERROR(err);
-  #ifdef FINISH
-  clFinish(queue[device_num]);
-  #endif
-  #ifdef SHOW_TIME
-  END_RE("write filter bias")
-  #endif
-
-  #ifdef SHOW_TIME
   START_RE
   #endif
   int OWK = OW * K;
