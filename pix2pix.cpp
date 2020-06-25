@@ -52,7 +52,7 @@
 #define PADDING(x, y) (((x)-1)/(y)*(y)+(y))
 
 #define DEVICE_NUM 1
-#define KERNEL_NUM 6
+#define KERNEL_NUM 8
 
 static cl_int err;
 static cl_platform_id platform;
@@ -61,7 +61,7 @@ static cl_context context[DEVICE_NUM];
 static cl_command_queue queue[DEVICE_NUM];
 static cl_program program[DEVICE_NUM];
 static cl_kernel kernel[DEVICE_NUM][KERNEL_NUM];
-enum kernel_type { K_CONV2D, K_CONV2D_TRANSPOSED, K_CONV2D_LEAKYRELU, K_CONV2D_BATCHNORM_LEAKYRELU, K_MEAN, K_VARIANCE };
+enum kernel_type { K_CONV2D, K_CONV2D_TRANSPOSED, K_CONV2D_LEAKYRELU, K_CONV2D_BATCHNORM_LEAKYRELU, K_MEAN, K_VARIANCE, K_BATCHNORM, K_BATCHNORM_LEAKYRELU };
 
 int num_threads = 4;
 
@@ -179,6 +179,7 @@ void pix2pix_init() {
     kernel[d][K_CONV2D_BATCHNORM_LEAKYRELU] = clCreateKernel(program[d], "conv2d_batchnorm_leakyrelu", &err);
     kernel[d][K_MEAN] = clCreateKernel(program[d], "mean", &err);
     kernel[d][K_VARIANCE] = clCreateKernel(program[d], "variance", &err);
+    kernel[d][K_BATCHNORM] = clCreateKernel(program[d], "batchnorm", &err);
     CHECK_ERROR(err);
   }
 
@@ -1395,11 +1396,10 @@ void encoding(
     END_RE("2 -> 3 write filter bias scale offset")
     #endif
 
-    #ifdef SHOW_TIME
-    START_RE
-    #endif
-
     { // conv2d
+      #ifdef SHOW_TIME
+      START_RE
+      #endif
       size_t H = H_, W = W_, C = C_;
       size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[3];
       const size_t stride = 2, pad = 1;
@@ -1470,26 +1470,14 @@ void encoding(
       C_ = K;
     }
 
-    #ifdef SHOW_TIME
-    START_RE
-    #endif
-    // write
-    err = clEnqueueReadBuffer(queue[device_num], A, CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
-    CHECK_ERROR(err);
-    #ifdef FINISH
-    clFinish(queue[device_num]);
-    #endif
-    #ifdef SHOW_TIME
-    END_RE("write")
-    #endif
-
-    printf("conv2d result   %f\n", encoded.buf[0]);
-
     cl_mem mean_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C_ * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
     cl_mem variance_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C_ * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
     { // mean
+      #ifdef SHOW_TIME
+      START_RE
+      #endif
       int H = H_;
       int W = W_;
       int C = C_;
@@ -1521,6 +1509,103 @@ void encoding(
       END_RE("2 -> 3 run kernel mean")
       #endif
     }
+
+    { // variance
+      #ifdef SHOW_TIME
+      START_RE
+      #endif
+      int H = H_;
+      int W = W_;
+      int C = C_;
+
+      cl_mem &input = A;
+
+      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 0, sizeof(cl_mem), &input);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 1, sizeof(cl_mem), &mean_mem);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 2, sizeof(cl_mem), &variance_mem);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 3, sizeof(int), &H);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 4, sizeof(int), &W);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 5, sizeof(int), &C);
+      CHECK_ERROR(err);
+
+      size_t gws[1] = {C}, lws[1] = {C};
+      for (int i = 0; i < 1; ++i) {
+        gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+      }
+
+      err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_VARIANCE], 1, NULL, gws, lws, 0, NULL, NULL);
+      CHECK_ERROR(err);
+      #ifdef FINISH
+      clFinish(queue[device_num]);
+      #endif
+      #ifdef SHOW_TIME
+      END_RE("2 -> 3 run kernel variance")
+      #endif
+    }
+
+    { // batchnorm_relu
+      #ifdef SHOW_TIME
+      START_RE
+      #endif
+      size_t H = H_;
+      size_t W = W_;
+      size_t C = C_;
+      size_t K_p = 0;
+      LOG2S(C, K_p);
+      const size_t K_mask = ((1 << K_p) - 1);
+
+      cl_mem &input = A;
+      cl_mem &output = B;
+
+      err = clSetKernelArg(kernel[device_num][K_BATCHNORM], 0, sizeof(cl_mem), &input);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_BATCHNORM], 1, sizeof(cl_mem), &mean_mem);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_BATCHNORM], 2, sizeof(cl_mem), &variance_mem);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_BATCHNORM], 3, sizeof(cl_mem), &output);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_BATCHNORM], 4, sizeof(cl_mem), &offset_mem);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_BATCHNORM], 5, sizeof(cl_mem), &scale_mem);
+      CHECK_ERROR(err);
+      err = clSetKernelArg(kernel[device_num][K_BATCHNORM], 6, sizeof(int), &K_mask);
+      CHECK_ERROR(err);
+
+      size_t gws[1] = {C}, lws[1] = {C};
+      for (int i = 0; i < 1; ++i) {
+        gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+      }
+
+      err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_BATCHNORM], 1, NULL, gws, lws, 0, NULL, NULL);
+      CHECK_ERROR(err);
+      #ifdef FINISH
+      clFinish(queue[device_num]);
+      #endif
+      #ifdef SHOW_TIME
+      END_RE("2 -> 3 run kernel variance")
+      #endif
+    }
+
+    #ifdef SHOW_TIME
+    START_RE
+    #endif
+    // write
+    err = clEnqueueReadBuffer(queue[device_num], B, CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
+    CHECK_ERROR(err);
+    #ifdef FINISH
+    clFinish(queue[device_num]);
+    #endif
+    #ifdef SHOW_TIME
+    END_RE("write")
+    #endif
+
+    printf("batchnorm result   %f\n", encoded.buf[0]);
 
     /*
     #ifdef SHOW_TIME
