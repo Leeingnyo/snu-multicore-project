@@ -114,7 +114,7 @@ void mean_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, size_t &H, siz
 void variance_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, size_t H, size_t W, size_t C);
 void batchnorm_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, cl_mem &output, cl_mem &offset_mem, cl_mem &scale_mem, size_t H, size_t W, size_t C);
 void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter, Tensor bias, size_t &H, size_t &W, size_t &C);
-void concat_kernel(int device_num, cl_mem &input, cl_mem &input2, cl_mem &output, int H, int W, int C0, int C1);
+void concat_kernel(int device_num, cl_mem &input, cl_mem &input2, cl_mem &output, int H, int W, int C0, int C1, size_t &C);
 
 static cl_program create_and_build_program_with_source(cl_context context, cl_device_id device, const char *file_name) {
   FILE *file = fopen(file_name, "rb");
@@ -1319,7 +1319,7 @@ void pix2pix_iter(
     #endif
 
     { // leakyrelu (i = step)
-      cl_mem &input = S[1];
+      cl_mem &input = S[step - 1];
       cl_mem &output = B;
       leakyrelu(device_num, input, output, 0.2f, H_, W_, C_);
     }
@@ -1379,24 +1379,7 @@ void pix2pix_iter(
         cl_mem &input = A;
         cl_mem &input2 = S[i];
         cl_mem &output = B;
-        concat_kernel(device_num, input, input2, output, H_, W_, C_, C_);
-
-      #ifdef SHOW_TIME
-      float st, et;
-      START_RE
-      #endif
-      Tensor encoded;
-      encoded.alloc_once({H_, W_, C_});
-      err = clEnqueueReadBuffer(queue[device_num], output, CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
-      CHECK_ERROR(err);
-      #ifdef FINISH
-      clFinish(queue[device_num]);
-      #endif
-      #ifdef SHOW_TIME
-      END_RE("read")
-      #endif
-
-      printf("concat %f %f %f %f\n", encoded.buf[0], encoded.buf[8], encoded.buf[25], encoded.buf[254]);
+        concat_kernel(device_num, input, input2, output, H_, W_, C_, C_, C_);
       }
         
       {
@@ -1408,24 +1391,6 @@ void pix2pix_iter(
       cl_mem &input = A;
       cl_mem &output = B;
       conv2d_transposed_kernel(device_num, input, output, filter, bias, H_, W_, C_);
-      // printf("filter bias %f %f\n", filter.buf[0], bias.buf[0]);
-
-      #ifdef SHOW_TIME
-      float st, et;
-      START_RE
-      #endif
-      Tensor encoded;
-      encoded.alloc_once({H_, W_, C_});
-      err = clEnqueueReadBuffer(queue[device_num], output, CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
-      CHECK_ERROR(err);
-      #ifdef FINISH
-      clFinish(queue[device_num]);
-      #endif
-      #ifdef SHOW_TIME
-      END_RE("read")
-      #endif
-
-      printf("%f %f %f\n", encoded.buf[0], encoded.buf[1], encoded.buf[207]);
     }
 
     // Last decoder does not have batchnorm
@@ -1752,50 +1717,41 @@ void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, Ten
   #ifdef SHOW_TIME
   START_RE
   #endif
-  int H_ = H;
-  int W_ = W;
-  int C_ = C;
-  int R_ = R;
-  int S_ = S;
-  int K_ = K;
-  int OH_ = OH;
-  int OW_ = OW;
-  int stride_ = stride;
-  int pad_ = pad;
   int OWK = OW * K;
 
-  for (int d = 0; d < DEVICE_NUM; d++) {
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 0, sizeof(cl_mem), &input);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 1, sizeof(cl_mem), &filter_mem);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 2, sizeof(cl_mem), &bias_mem);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 3, sizeof(cl_mem), &output);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 4, sizeof(int), &H_);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 5, sizeof(int), &W_);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 6, sizeof(int), &C_);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 7, sizeof(int), &R_);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 8, sizeof(int), &S_);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 9, sizeof(int), &K_);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 10, sizeof(int), &OH_);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 11, sizeof(int), &OW_);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 12, sizeof(int), &stride_);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 13, sizeof(int), &pad_);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel[d][K_CONV2D_TRANSPOSED], 14, sizeof(int), &OWK);
-    CHECK_ERROR(err);
-  }
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 0, sizeof(cl_mem), &input);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 1, sizeof(cl_mem), &filter_mem);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 2, sizeof(cl_mem), &bias_mem);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 3, sizeof(cl_mem), &output);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 4, sizeof(int), &H);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 5, sizeof(int), &W);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 6, sizeof(int), &C);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 7, sizeof(int), &R);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 8, sizeof(int), &S);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 9, sizeof(int), &K);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 10, sizeof(int), &OH);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 11, sizeof(int), &OW);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 12, sizeof(int), &stride);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 13, sizeof(int), &pad);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D_TRANSPOSED], 14, sizeof(int), &OWK);
+  CHECK_ERROR(err);
+
+  printf("conv2d_transposed_kernel %lu %lu %lu | %lu %lu %lu | %lu %lu\n", H, W, C, R, S, K, OH, OW);
+  printf("filter bias %f %f %f %f\n", filter.buf[0], bias.buf[0], filter.buf[511], bias.buf[511]);
 
   size_t gws[1] = {OH * OW * K}, lws[1] = {128};
   for (int i = 0; i < 1; ++i) {
@@ -1804,9 +1760,12 @@ void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, Ten
 
   // Run kernel
   for (int d = 0; d < DEVICE_NUM; d++) {
-    err = clEnqueueNDRangeKernel(queue[d], kernel[d][K_CONV2D_TRANSPOSED], 1, NULL, gws, lws, 0, NULL, NULL);
+    err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_CONV2D_TRANSPOSED], 1, NULL, gws, lws, 0, NULL, NULL);
     CHECK_ERROR(err);
   }
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
   #ifdef SHOW_TIME
   END_RE("conv2d_transposed")
   #endif
@@ -1816,7 +1775,7 @@ void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, Ten
   C = K;
 }
 
-void concat_kernel(int device_num, cl_mem &input, cl_mem &input2, cl_mem &output, int H, int W, int C0, int C1) {
+void concat_kernel(int device_num, cl_mem &input, cl_mem &input2, cl_mem &output, int H, int W, int C0, int C1, size_t &C) {
   #ifdef SHOW_TIME
   float st, et;
   START_RE
@@ -1850,4 +1809,6 @@ void concat_kernel(int device_num, cl_mem &input, cl_mem &input2, cl_mem &output
   #ifdef SHOW_TIME
   END_RE("run kernel concat")
   #endif
+
+  C = C0 + C1;
 }

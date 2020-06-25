@@ -268,7 +268,7 @@ __kernel void concat(
   if (c - C0 < 0) {
     output[idx] = input0[h * W * C0 + w * C0 + c];
   } else {
-    output[idx] = input1[h * W * C1 + w * C1 + c];
+    output[idx] = input1[h * W * C1 + w * C1 + c - C0];
   }
 }
 
