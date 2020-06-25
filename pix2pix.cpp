@@ -103,7 +103,7 @@ void leakyrelu(int device_num, cl_mem &input, cl_mem &output, float alpha, size_
 void mean_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, size_t &H, size_t &W, size_t &C);
 void variance_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, size_t H, size_t W, size_t C);
 void batchnorm_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, cl_mem &output, cl_mem &offset_mem, cl_mem &scale_mem, size_t H, size_t W, size_t C);
-void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, cl_mem &filter, cl_mem &bias, size_t &H, size_t &W, size_t &C, size_t R, size_t S, size_t K);
+void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, cl_mem &filter_mem, cl_mem &bias_mem, size_t &H, size_t &W, size_t &C, size_t R, size_t S, size_t K);
 void concat_kernel(int device_num, cl_mem &input, cl_mem &input2, cl_mem &output, int H, int W, int C0, int C1, size_t &C);
 
 static cl_program create_and_build_program_with_source(cl_context context, cl_device_id device, const char *file_name) {
@@ -701,7 +701,7 @@ void pix2pix_iter(
       cl_mem &filter_mem = weight_buffers[device_num][scope + "/conv2d_transpose/kernel"];
       cl_mem &bias_mem = weight_buffers[device_num][scope + "/conv2d_transpose/bias"];
 
-      size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[3];
+      size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[2];
       conv2d_transposed_kernel(device_num, input, output, filter_mem, bias_mem, H_, W_, C_, R, S, K);
     }
 
