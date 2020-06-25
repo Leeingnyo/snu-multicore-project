@@ -462,13 +462,13 @@ void pix2pix_iter(
   cl_mem B = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, 1024 * 1024 * 8 * sizeof(float), NULL, &err);
   CHECK_ERROR(err);
 
-  cl_mem S[9];
+  cl_mem intermediate[9];
   for (int i = 0; i < 9; i++) {
-    S[i] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, 1024 * 1024 * 8 * sizeof(float), NULL, &err);
+    intermediate[i] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, 1024 * 1024 * 8 * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
   }
 
-  clEnqueueWriteBuffer(queue[device_num], S[0], CL_TRUE, 0, one_image.sz * sizeof(float), one_image.buf, 0, NULL, NULL);
+  clEnqueueWriteBuffer(queue[device_num], intermediate[0], CL_TRUE, 0, one_image.sz * sizeof(float), one_image.buf, 0, NULL, NULL);
   CHECK_ERROR(err);
 
   #ifdef FINISH
@@ -487,7 +487,7 @@ void pix2pix_iter(
     {
       auto filter = weights["generator/encoder_1/conv2d/kernel"];
       auto bias = weights["generator/encoder_1/conv2d/bias"];
-      conv2d_kernel(device_num, S[0], S[1], filter, bias, H_, W_, C_);
+      conv2d_kernel(device_num, intermediate[0], intermediate[1], filter, bias, H_, W_, C_);
     }
   }
   // 2 -> 8
@@ -524,7 +524,7 @@ void pix2pix_iter(
     #endif
 
     { // leakyrelu (i = step)
-      cl_mem &input = S[step - 1];
+      cl_mem &input = intermediate[step - 1];
       cl_mem &output = B;
       leakyrelu(device_num, input, output, 0.2f, H_, W_, C_);
     }
@@ -551,7 +551,7 @@ void pix2pix_iter(
 
     { // batchnorm
       cl_mem &input = A;
-      cl_mem &output = S[step];
+      cl_mem &output = intermediate[step];
       batchnorm_kernel(device_num, input, mean_mem, variance_mem, output, offset_mem, scale_mem, H_, W_, C_);
     }
 
@@ -572,7 +572,7 @@ void pix2pix_iter(
       // decoder_layer_input[i] = pppp;
 
       {
-        leakyrelu(device_num, S[8], A, 0.0f, H_, W_, C_);
+        leakyrelu(device_num, intermediate[8], A, 0.0f, H_, W_, C_);
       }
     } else {
       // For other decoder, input is concatenation of previous layer and corresponding encoder layer
@@ -580,7 +580,7 @@ void pix2pix_iter(
       {
         // A -> B
         cl_mem &input = A;
-        cl_mem &input2 = S[i];
+        cl_mem &input2 = intermediate[i];
         cl_mem &output = B;
         concat_kernel(device_num, input, input2, output, H_, W_, C_, C_, C_);
       }
@@ -664,7 +664,7 @@ void pix2pix_iter(
   clReleaseMemObject(A);
   clReleaseMemObject(B);
   for (int i = 0; i < 9; i++) {
-    clReleaseMemObject(S[i]);
+    clReleaseMemObject(intermediate[i]);
   }
   #ifdef FINISH
   clFinish(queue[device_num]);
