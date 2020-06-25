@@ -51,7 +51,7 @@
 #define TILE_SIZE 28
 #define PADDING(x, y) (((x)-1)/(y)*(y)+(y))
 
-#define DEVICE_NUM 1
+#define DEVICE_NUM 4
 #define KERNEL_NUM 8
 
 static cl_int err;
@@ -232,7 +232,7 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
      * Encoding phase
      */
     Tensor processed;
-    pix2pix_iter(0, one_image, processed, weights);
+    pix2pix_iter(img_idx % DEVICE_NUM, one_image, processed, weights);
 
     // Put a image into output buffer
     postprocess_one_image(processed, output_buf, img_idx);
