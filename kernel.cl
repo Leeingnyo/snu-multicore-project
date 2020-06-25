@@ -242,6 +242,16 @@ __kernel void batchnorm_leakyrelu(
   output[idx] = x >= 0 ? x : alpha * x;
 }
 
+__kernel void leakyrelu(
+  __global float *input,
+  __global float *output,
+  float alpha
+) {
+  int idx = get_global_id(0);
+  float x = input[idx];
+  output[idx] = x >= 0 ? x : alpha * x;
+}
+
 inline float atomicadd(volatile __global float* address, const float value){
   float old = value;
   while ((old = atomic_xchg(address, atomic_xchg(address, 0.0f)+old))!=0.0f);
