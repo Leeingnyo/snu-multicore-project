@@ -223,6 +223,25 @@ __kernel void batchnorm(
   output[idx] = offset[k] + (input[idx] - mean[k]) * scale[k] / sqrt(variance[k] + epsilon);
 }
 
+__kernel void batchnorm_leakyrelu(
+  __global float *input,
+  __global float *mean,
+  __global float *variance,
+  __global float *output,
+  __global float *offset,
+  __global float *scale,
+  int K_mask,
+  float alpha
+) {
+  int idx = get_global_id(0);
+  int k = idx & K_mask;
+
+  float epsilon = 1e-5;
+  float x = offset[k] + (input[idx] - mean[k]) * scale[k] / sqrt(variance[k] + epsilon);
+  // relu
+  output[idx] = x >= 0 ? x : alpha * x;
+}
+
 inline float atomicadd(volatile __global float* address, const float value){
   float old = value;
   while ((old = atomic_xchg(address, atomic_xchg(address, 0.0f)+old))!=0.0f);
