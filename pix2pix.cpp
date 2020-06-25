@@ -136,6 +136,10 @@ static cl_program create_and_build_program_with_source(cl_context context, cl_de
   return program;
 }
 
+cl_mem A[DEVICE_NUM];
+cl_mem B[DEVICE_NUM];
+cl_mem intermediate[DEVICE_NUM][9];
+
 void pix2pix_init() {
   /*
    * You can do input-independent and input-size-independent jobs here.
@@ -178,6 +182,18 @@ void pix2pix_init() {
     kernel[d][K_LEAKYRELU] = clCreateKernel(program[d], "leakyrelu", &err);
     kernel[d][K_CONCAT] = clCreateKernel(program[d], "concat", &err);
     CHECK_ERROR(err);
+  }
+
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    A[d] = clCreateBuffer(context[d], CL_MEM_READ_WRITE, 1024 * 1024 * 8 * sizeof(float), NULL, &err);
+    CHECK_ERROR(err);
+    B[d] = clCreateBuffer(context[d], CL_MEM_READ_WRITE, 1024 * 1024 * 8 * sizeof(float), NULL, &err);
+    CHECK_ERROR(err);
+
+    for (int i = 0; i < 9; i++) {
+      intermediate[d][i] = clCreateBuffer(context[d], CL_MEM_READ_WRITE, 1024 * 1024 * 8 * sizeof(float), NULL, &err);
+      CHECK_ERROR(err);
+    }
   }
 
   // alloc buffers
@@ -457,18 +473,8 @@ void pix2pix_iter(
   double st, et;
   START_RE
   #endif
-  cl_mem A = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, 1024 * 1024 * 8 * sizeof(float), NULL, &err);
-  CHECK_ERROR(err);
-  cl_mem B = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, 1024 * 1024 * 8 * sizeof(float), NULL, &err);
-  CHECK_ERROR(err);
 
-  cl_mem intermediate[9];
-  for (int i = 0; i < 9; i++) {
-    intermediate[i] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, 1024 * 1024 * 8 * sizeof(float), NULL, &err);
-    CHECK_ERROR(err);
-  }
-
-  clEnqueueWriteBuffer(queue[device_num], intermediate[0], CL_TRUE, 0, one_image.sz * sizeof(float), one_image.buf, 0, NULL, NULL);
+  clEnqueueWriteBuffer(queue[device_num], intermediate[device_num][0], CL_TRUE, 0, one_image.sz * sizeof(float), one_image.buf, 0, NULL, NULL);
   CHECK_ERROR(err);
 
   #ifdef FINISH
@@ -521,7 +527,7 @@ void pix2pix_iter(
       #endif
 
       size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[3];
-      conv2d_kernel(device_num, intermediate[0], intermediate[1], filter_mem, bias_mem, H_, W_, C_, R, S, K);
+      conv2d_kernel(device_num, intermediate[device_num][0], intermediate[device_num][1], filter_mem, bias_mem, H_, W_, C_, R, S, K);
     }
   }
   // 2 -> 8
@@ -565,14 +571,14 @@ void pix2pix_iter(
     #endif
 
     { // leakyrelu (i = step)
-      cl_mem &input = intermediate[step - 1];
-      cl_mem &output = B;
+      cl_mem &input = intermediate[device_num][step - 1];
+      cl_mem &output = B[device_num];
       leakyrelu(device_num, input, output, 0.2f, H_, W_, C_);
     }
 
     { // conv2d
-      cl_mem &input = B;
-      cl_mem &output = A;
+      cl_mem &input = B[device_num];
+      cl_mem &output = A[device_num];
       #ifdef SHOW_TIME
       double st, et;
       START_RE
@@ -615,18 +621,18 @@ void pix2pix_iter(
     cl_mem variance_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C_ * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
     { // mean
-      cl_mem &input = A;
+      cl_mem &input = A[device_num];
       mean_kernel(device_num, input, mean_mem, H_, W_, C_);
     }
 
     { // variance
-      cl_mem &input = A;
+      cl_mem &input = A[device_num];
       variance_kernel(device_num, input, mean_mem, variance_mem, H_, W_, C_);
     }
 
     { // batchnorm
-      cl_mem &input = A;
-      cl_mem &output = intermediate[step];
+      cl_mem &input = A[device_num];
+      cl_mem &output = intermediate[device_num][step];
       cl_mem &scale_mem = weight_buffers[device_num][scope + "/batch_normalization/gamma"];
       cl_mem &offset_mem = weight_buffers[device_num][scope + "/batch_normalization/beta"];
       batchnorm_kernel(device_num, input, mean_mem, variance_mem, output, offset_mem, scale_mem, H_, W_, C_);
@@ -646,21 +652,21 @@ void pix2pix_iter(
       // decoder_layer_input[i] = pppp;
 
       {
-        leakyrelu(device_num, intermediate[8], A, 0.0f, H_, W_, C_);
+        leakyrelu(device_num, intermediate[device_num][8], A[device_num], 0.0f, H_, W_, C_);
       }
     } else {
       // For other decoder, input is concatenation of previous layer and corresponding encoder layer
       // concat(decoder_layer[i + 1], encoder_layer[i], decoder_layer_input[i]);
       {
         // A -> B
-        cl_mem &input = A;
-        cl_mem &input2 = intermediate[i];
-        cl_mem &output = B;
+        cl_mem &input = A[device_num];
+        cl_mem &input2 = intermediate[device_num][i];
+        cl_mem &output = B[device_num];
         concat_kernel(device_num, input, input2, output, H_, W_, C_, C_, C_);
       }
         
       {
-        leakyrelu(device_num, B, A, 0.0f, H_, W_, C_);
+        leakyrelu(device_num, B[device_num], A[device_num], 0.0f, H_, W_, C_);
       }
     }
 
@@ -693,8 +699,8 @@ void pix2pix_iter(
       END_RE("write filter bias")
       #endif
 
-      cl_mem &input = A;
-      cl_mem &output = B;
+      cl_mem &input = A[device_num];
+      cl_mem &output = B[device_num];
       cl_mem &filter_mem = weight_buffers[device_num][scope + "/conv2d_transpose/kernel"];
       cl_mem &bias_mem = weight_buffers[device_num][scope + "/conv2d_transpose/bias"];
 
@@ -731,18 +737,18 @@ void pix2pix_iter(
     cl_mem variance_mem = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, C_ * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
     { // mean
-      cl_mem &input = B;
+      cl_mem &input = B[device_num];
       mean_kernel(device_num, input, mean_mem, H_, W_, C_);
     }
 
     { // variance
-      cl_mem &input = B;
+      cl_mem &input = B[device_num];
       variance_kernel(device_num, input, mean_mem, variance_mem, H_, W_, C_);
     }
 
     { // batchnorm
-      cl_mem &input = B;
-      cl_mem &output = A;
+      cl_mem &input = B[device_num];
+      cl_mem &output = A[device_num];
       cl_mem &scale_mem = weight_buffers[device_num][scope + "/batch_normalization/gamma"];
       cl_mem &offset_mem = weight_buffers[device_num][scope + "/batch_normalization/beta"];
       batchnorm_kernel(device_num, input, mean_mem, variance_mem, output, offset_mem, scale_mem, H_, W_, C_);
@@ -762,28 +768,13 @@ void pix2pix_iter(
   START_RE
   #endif
   encoded.alloc_once({H_, W_, C_});
-  err = clEnqueueReadBuffer(queue[device_num], B, CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
+  err = clEnqueueReadBuffer(queue[device_num], B[device_num], CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
   CHECK_ERROR(err);
   #ifdef FINISH
   clFinish(queue[device_num]);
   #endif
   #ifdef SHOW_TIME
   END_RE("read")
-  #endif
-
-  #ifdef SHOW_TIME
-  START_RE
-  #endif
-  clReleaseMemObject(A);
-  clReleaseMemObject(B);
-  for (int i = 0; i < 9; i++) {
-    clReleaseMemObject(intermediate[i]);
-  }
-  #ifdef FINISH
-  clFinish(queue[device_num]);
-  #endif
-  #ifdef SHOW_TIME
-  END_RE("release mem object")
   #endif
 }
 
