@@ -111,6 +111,7 @@ void encoding(
 void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter, Tensor bias, size_t &H, size_t &W, size_t &C);
 void leakyrelu(int device_num, cl_mem &input, cl_mem &output, float alpha, size_t H, size_t W, size_t C);
 void mean_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, size_t &H, size_t &W, size_t &C);
+void variance_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, size_t H, size_t W, size_t C);
 
 static cl_program create_and_build_program_with_source(cl_context context, cl_device_id device, const char *file_name) {
   FILE *file = fopen(file_name, "rb");
@@ -1330,45 +1331,13 @@ void encoding(
     cl_mem variance_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C_ * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
     { // mean
-      mean_kernel(device_num, A, mean_mem, H_, W_, C_);
+      cl_mem &input = A;
+      mean_kernel(device_num, input, mean_mem, H_, W_, C_);
     }
 
     { // variance
-      #ifdef SHOW_TIME
-      START_RE
-      #endif
-      size_t H = H_;
-      size_t W = W_;
-      size_t C = C_;
-
       cl_mem &input = A;
-
-      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 0, sizeof(cl_mem), &input);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 1, sizeof(cl_mem), &mean_mem);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 2, sizeof(cl_mem), &variance_mem);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 3, sizeof(int), &H);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 4, sizeof(int), &W);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_VARIANCE], 5, sizeof(int), &C);
-      CHECK_ERROR(err);
-
-      size_t gws[1] = {C}, lws[1] = {C};
-      for (int i = 0; i < 1; ++i) {
-        gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
-      }
-
-      err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_VARIANCE], 1, NULL, gws, lws, 0, NULL, NULL);
-      CHECK_ERROR(err);
-      #ifdef FINISH
-      clFinish(queue[device_num]);
-      #endif
-      #ifdef SHOW_TIME
-      END_RE("3 -> 4 run kernel variance")
-      #endif
+      variance_kernel(device_num, input, mean_mem, variance_mem, H_, W_, C_);
     }
 
     { // batchnorm
@@ -1873,5 +1842,39 @@ void mean_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, size_t &H, siz
   #endif
   #ifdef SHOW_TIME
   END_RE("run kernel mean")
+  #endif
+}
+
+void variance_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, size_t H, size_t W, size_t C) {
+  #ifdef SHOW_TIME
+  float st; et;
+  START_RE
+  #endif
+
+  err = clSetKernelArg(kernel[device_num][K_VARIANCE], 0, sizeof(cl_mem), &input);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_VARIANCE], 1, sizeof(cl_mem), &mean_mem);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_VARIANCE], 2, sizeof(cl_mem), &variance_mem);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_VARIANCE], 3, sizeof(int), &H);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_VARIANCE], 4, sizeof(int), &W);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_VARIANCE], 5, sizeof(int), &C);
+  CHECK_ERROR(err);
+
+  size_t gws[1] = {C}, lws[1] = {C};
+  for (int i = 0; i < 1; ++i) {
+    gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+  }
+
+  err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_VARIANCE], 1, NULL, gws, lws, 0, NULL, NULL);
+  CHECK_ERROR(err);
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
+  #ifdef SHOW_TIME
+  END_RE("run kernel variance")
   #endif
 }
