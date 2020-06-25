@@ -10,6 +10,7 @@
 #include <string>
 #include <map>
 #include <cmath>
+#include <mutex>
 
 // #define SHOW_TIME
 // #define FINISH
@@ -67,6 +68,7 @@ int num_threads = 4;
 
 std::map<std::string, cl_mem> weight_buffers[DEVICE_NUM];
 std::map<std::string, bool> weight_buffers_bound[DEVICE_NUM];
+std::mutex mut[DEVICE_NUM];
 
 class Tensor {
 public:
@@ -493,6 +495,7 @@ void pix2pix_iter(
       auto filter = weights["generator/encoder_1/conv2d/kernel"];
       auto bias = weights["generator/encoder_1/conv2d/bias"];
 
+      mut[device_num].lock();
       if (!weight_buffers_bound[device_num]["generator/encoder_1/conv2d/kernel"]) {
         weight_buffers[device_num]["generator/encoder_1/conv2d/kernel"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, filter.sz * sizeof(float), NULL, &err);
         CHECK_ERROR(err);
@@ -501,6 +504,9 @@ void pix2pix_iter(
         CHECK_ERROR(err);
         weight_buffers_bound[device_num]["generator/encoder_1/conv2d/kernel"] = true;
       }
+      mut[device_num].unlock();
+
+      mut[device_num].lock();
       if (!weight_buffers_bound[device_num]["generator/encoder_1/conv2d/bias"]) {
         weight_buffers[device_num]["generator/encoder_1/conv2d/bias"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, bias.sz * sizeof(float), NULL, &err);
         cl_mem &bias_mem = weight_buffers[device_num]["generator/encoder_1/conv2d/bias"];
@@ -510,6 +516,7 @@ void pix2pix_iter(
         weight_buffers[device_num]["generator/encoder_1/conv2d/bias"] = bias_mem;
         weight_buffers_bound[device_num]["generator/encoder_1/conv2d/bias"] = true;
       }
+      mut[device_num].unlock();
 
       cl_mem &filter_mem = weight_buffers[device_num]["generator/encoder_1/conv2d/kernel"];
       cl_mem &bias_mem = weight_buffers[device_num]["generator/encoder_1/conv2d/bias"];
@@ -541,6 +548,7 @@ void pix2pix_iter(
     #ifdef SHOW_TIME
     START_RE
     #endif
+    mut[device_num].lock();
     if (!weight_buffers_bound[device_num][scope + "/batch_normalization/gamma"]) {
       weight_buffers[device_num][scope + "/batch_normalization/gamma"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, scale.sz * sizeof(float), NULL, &err);
       CHECK_ERROR(err);
@@ -549,7 +557,9 @@ void pix2pix_iter(
       CHECK_ERROR(err);
       weight_buffers_bound[device_num][scope + "/batch_normalization/gamma"] = true;
     }
+    mut[device_num].unlock();
 
+    mut[device_num].lock();
     if (!weight_buffers_bound[device_num][scope + "/batch_normalization/beta"]) {
       weight_buffers[device_num][scope + "/batch_normalization/beta"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, offset.sz * sizeof(float), NULL, &err);
       CHECK_ERROR(err);
@@ -558,6 +568,7 @@ void pix2pix_iter(
       CHECK_ERROR(err);
       weight_buffers_bound[device_num][scope + "/batch_normalization/beta"] = true;
     }
+    mut[device_num].unlock();
     #ifdef FINISH
     clFinish(queue[device_num]);
     #endif
@@ -578,6 +589,7 @@ void pix2pix_iter(
       double st, et;
       START_RE
       #endif
+      mut[device_num].lock();
       if (!weight_buffers_bound[device_num][scope + "/conv2d/kernel"]) {
         weight_buffers[device_num][scope + "/conv2d/kernel"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, filter.sz * sizeof(float), NULL, &err);
         CHECK_ERROR(err);
@@ -586,6 +598,9 @@ void pix2pix_iter(
         CHECK_ERROR(err);
         weight_buffers_bound[device_num][scope + "/conv2d/kernel"] = true;
       }
+      mut[device_num].unlock();
+
+      mut[device_num].lock();
       if (!weight_buffers_bound[device_num][scope + "/conv2d/bias"]) {
         auto bias = weights[scope + "/conv2d/bias"];
         weight_buffers[device_num][scope + "/conv2d/bias"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, bias.sz * sizeof(float), NULL, &err);
@@ -596,6 +611,7 @@ void pix2pix_iter(
         weight_buffers[device_num][scope + "/conv2d/bias"] = bias_mem;
         weight_buffers_bound[device_num][scope + "/conv2d/bias"] = true;
       }
+      mut[device_num].unlock();
 
       cl_mem &filter_mem = weight_buffers[device_num][scope + "/conv2d/kernel"];
       cl_mem &bias_mem = weight_buffers[device_num][scope + "/conv2d/bias"];
@@ -670,6 +686,7 @@ void pix2pix_iter(
       double st, et;
       START_RE
       #endif
+      mut[device_num].lock();
       if (!weight_buffers_bound[device_num][scope + "/conv2d_transpose/kernel"]) {
         weight_buffers[device_num][scope + "/conv2d_transpose/kernel"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, filter.sz * sizeof(float), NULL, &err);
         CHECK_ERROR(err);
@@ -678,7 +695,9 @@ void pix2pix_iter(
         CHECK_ERROR(err);
         weight_buffers_bound[device_num][scope + "/conv2d_transpose/kernel"] = true;
       }
+      mut[device_num].unlock();
 
+      mut[device_num].lock();
       if (!weight_buffers_bound[device_num][scope + "/conv2d_transpose/bias"]) {
         weight_buffers[device_num][scope + "/conv2d_transpose/bias"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, bias.sz * sizeof(float), NULL, &err);
         CHECK_ERROR(err);
@@ -687,6 +706,7 @@ void pix2pix_iter(
         CHECK_ERROR(err);
         weight_buffers_bound[device_num][scope + "/conv2d_transpose/bias"] = true;
       }
+      mut[device_num].unlock();
       #ifdef FINISH
       clFinish(queue[device_num]);
       #endif
@@ -712,6 +732,7 @@ void pix2pix_iter(
     auto scale = weights[scope + "/batch_normalization/gamma"];
     auto offset = weights[scope + "/batch_normalization/beta"];
 
+    mut[device_num].lock();
     if (!weight_buffers_bound[device_num][scope + "/batch_normalization/gamma"]) {
       weight_buffers[device_num][scope + "/batch_normalization/gamma"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, scale.sz * sizeof(float), NULL, &err);
       CHECK_ERROR(err);
@@ -720,7 +741,9 @@ void pix2pix_iter(
       CHECK_ERROR(err);
       weight_buffers_bound[device_num][scope + "/batch_normalization/gamma"] = true;
     }
+    mut[device_num].unlock();
 
+    mut[device_num].lock();
     if (!weight_buffers_bound[device_num][scope + "/batch_normalization/beta"]) {
       weight_buffers[device_num][scope + "/batch_normalization/beta"] = clCreateBuffer(context[device_num], CL_MEM_READ_ONLY, offset.sz * sizeof(float), NULL, &err);
       CHECK_ERROR(err);
@@ -729,6 +752,7 @@ void pix2pix_iter(
       CHECK_ERROR(err);
       weight_buffers_bound[device_num][scope + "/batch_normalization/beta"] = true;
     }
+    mut[device_num].unlock();
     #ifdef FINISH
     clFinish(queue[device_num]);
     #endif
