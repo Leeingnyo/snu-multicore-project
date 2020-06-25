@@ -1042,10 +1042,8 @@ void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, cl_
   }
 
   // Run kernel
-  for (int d = 0; d < DEVICE_NUM; d++) {
-    err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_CONV2D_TRANSPOSED], 1, NULL, gws, lws, 0, NULL, NULL);
-    CHECK_ERROR(err);
-  }
+  err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_CONV2D_TRANSPOSED], 1, NULL, gws, lws, 0, NULL, NULL);
+  CHECK_ERROR(err);
   #ifdef FINISH
   clFinish(queue[device_num]);
   #endif
