@@ -1412,9 +1412,10 @@ void encoding(
   }
   // 2 -> 8
   // conv2d
-  // sum
-  // srsum
-  // batchnorm_relu
+  // mean
+  // variance
+  // batchnorm
+  // leakyrelu
   for (int step = 2; step < 8; step++) {
     auto scope = "generator/encoder_" + std::to_string(step);
     auto filter = weights[scope + "/conv2d/kernel"];
@@ -1657,30 +1658,11 @@ void encoding(
     clReleaseMemObject(mean_mem);
     clReleaseMemObject(variance_mem);
   }
-  // 4 -> 5
-  // conv2d
-  // sum
-  // srsum
-  // batchnorm_relu
-  //
-  // 5 -> 6
-  // conv2d
-  // sum
-  // srsum
-  // batchnorm_relu
-  //
-  // 6 -> 7
-  // conv2d
-  // sum
-  // srsum
-  // batchnorm_relu
-  //
-  // 7 -> 8
-  // conv2d
-  // sum
-  // srsum
-  // batchnorm
   // 8 -> 9
+  // conv2d
+  // mean
+  // variance
+  // batchnorm
   {
     auto scope = "generator/encoder_" + std::to_string(8);
     auto filter = weights[scope + "/conv2d/kernel"];
@@ -1910,6 +1892,15 @@ void encoding(
       END_RE("8 -> 9 run kernel batchnorm")
       #endif
     }
+
+    clReleaseMemObject(filter_mem);
+    clReleaseMemObject(bias_mem);
+
+    clReleaseMemObject(scale_mem);
+    clReleaseMemObject(offset_mem);
+
+    clReleaseMemObject(mean_mem);
+    clReleaseMemObject(variance_mem);
   }
 
   #ifdef SHOW_TIME
