@@ -252,6 +252,26 @@ __kernel void leakyrelu(
   output[idx] = x >= 0 ? x : alpha * x;
 }
 
+__kernel void concat(
+  __global float *input0,
+  __global float *input1,
+  __global float *output,
+  int H,
+  int W,
+  int C0,
+  int C1
+) {
+  int idx = get_global_id(0);
+  int h = idx / W / (C0 + C1);
+  int w = idx / (C0 + C1) % W;
+  int c = idx % (C0 + C1);
+  if (c - C0 < 0) {
+    output[idx] = input0[h * W * C0 + w * C0 + c];
+  } else {
+    output[idx] = input1[h * W * C1 + w * C1 + c];
+  }
+}
+
 inline float atomicadd(volatile __global float* address, const float value){
   float old = value;
   while ((old = atomic_xchg(address, atomic_xchg(address, 0.0f)+old))!=0.0f);
