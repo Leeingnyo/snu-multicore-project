@@ -512,6 +512,9 @@ void pix2pix_iter(
     CHECK_ERROR(err);
     err = clEnqueueWriteBuffer(queue[device_num], offset_mem, CL_TRUE, 0, offset.sz * sizeof(float), offset.buf, 0, NULL, NULL);
     CHECK_ERROR(err);
+    #ifdef FINISH
+    clFinish(queue[device_num]);
+    #endif
     #ifdef SHOW_TIME
     // 이거 중복 아닌가?
     END_RE("3 -> 4 write filter bias scale offset")
@@ -660,6 +663,9 @@ void pix2pix_iter(
   for (int i = 0; i < 9; i++) {
     clReleaseMemObject(S[i]);
   }
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
   #ifdef SHOW_TIME
   END_RE("release mem object")
   #endif
@@ -682,6 +688,9 @@ void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter,
   CHECK_ERROR(err);
   err = clEnqueueWriteBuffer(queue[device_num], bias_mem, CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
   CHECK_ERROR(err);
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
   #ifdef SHOW_TIME
   END_RE("write filter bias")
   #endif
