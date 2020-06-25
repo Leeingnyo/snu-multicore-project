@@ -108,6 +108,9 @@ void encoding(
   Tensor &encoded,
   std::map<std::string, Tensor> &weights
 );
+void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter, Tensor bias, size_t &H, size_t &W, size_t &C);
+void leakyrelu(int device_num, cl_mem &input, cl_mem &output, float alpha, size_t H, size_t W, size_t C);
+void mean_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, size_t &H, size_t &W, size_t &C);
 
 static cl_program create_and_build_program_with_source(cl_context context, cl_device_id device, const char *file_name) {
   FILE *file = fopen(file_name, "rb");
@@ -1257,9 +1260,6 @@ void encoding(
     CHECK_ERROR(err);
   }
 
-  clEnqueueWriteBuffer(queue[device_num], A, CL_TRUE, 0, one_image.sz * sizeof(float), one_image.buf, 0, NULL, NULL);
-  CHECK_ERROR(err);
-
   clEnqueueWriteBuffer(queue[device_num], S[0], CL_TRUE, 0, one_image.sz * sizeof(float), one_image.buf, 0, NULL, NULL);
   CHECK_ERROR(err);
 
@@ -1278,136 +1278,15 @@ void encoding(
   //
   {
     {
-      cl_mem &input = S[0];
-      cl_mem &output = S[1];
       auto filter = weights["generator/encoder_1/conv2d/kernel"];
       auto bias = weights["generator/encoder_1/conv2d/bias"];
-
-      size_t H = H_, W = W_, C = C_;
-      size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[3];
-      const size_t stride = 2, pad = 1;
-      size_t OH = H / stride, OW = W / stride;
-
-      #ifdef SHOW_TIME
-      START_RE
-      #endif
-      cl_mem filter_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, filter.sz * sizeof(float), NULL, &err);
-      CHECK_ERROR(err);
-      cl_mem bias_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, bias.sz * sizeof(float), NULL, &err);
-      CHECK_ERROR(err);
-
-      err = clEnqueueWriteBuffer(queue[device_num], filter_mem, CL_TRUE, 0, filter.sz * sizeof(float), filter.buf, 0, NULL, NULL);
-      CHECK_ERROR(err);
-      err = clEnqueueWriteBuffer(queue[device_num], bias_mem, CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
-      CHECK_ERROR(err);
-      #ifdef SHOW_TIME
-      END_RE("1 -> 2 write filter bias")
-      #endif
-
-      #ifdef SHOW_TIME
-      START_RE
-      #endif
-      size_t K_p = 0;
-      size_t OW_p = 0;
-      LOG2S(K, K_p);
-      LOG2S(OW, OW_p);
-      const size_t K_mask = ((1 << K_p) - 1);
-      const size_t OW_mask = ((1 << OW_p) - 1);
-      float alpha = 0.2f;
-
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 0, sizeof(cl_mem), &input);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 1, sizeof(cl_mem), &filter_mem);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 2, sizeof(cl_mem), &bias_mem);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 3, sizeof(cl_mem), &output);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 4, sizeof(int), &H);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 5, sizeof(int), &W);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 6, sizeof(int), &C);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 7, sizeof(int), &R);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 8, sizeof(int), &S);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 9, sizeof(int), &K);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 10, sizeof(int), &OH);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 11, sizeof(int), &OW);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 12, sizeof(int), &stride);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 13, sizeof(int), &pad);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 14, sizeof(int), &K_p);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 15, sizeof(int), &OW_p);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 16, sizeof(int), &K_mask);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 17, sizeof(int), &OW_mask);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D_LEAKYRELU], 18, sizeof(float), &alpha);
-      CHECK_ERROR(err);
-
-      size_t gws[1] = {OH * OW * K}, lws[1] = {128};
-      for (int i = 0; i < 1; ++i) {
-        gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
-      }
-
-      err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_CONV2D_LEAKYRELU], 1, NULL, gws, lws, 0, NULL, NULL);
-      CHECK_ERROR(err);
-      #ifdef FINISH
-      clFinish(queue[device_num]);
-      #endif
-      #ifdef SHOW_TIME
-      END_RE("1 -> 2 run kernel conv2d_leakyrelu")
-      #endif
-
-      H_ = OH;
-      W_ = OW;
-      C_ = K;
-
-      clReleaseMemObject(filter_mem);
-      clReleaseMemObject(bias_mem);
+      conv2d_kernel(device_num, S[0], S[1], filter, bias, H_, W_, C_);
     }
 
     { // leakyrelu (i = 2)
-      #ifdef SHOW_TIME
-      START_RE
-      #endif
-      size_t H = H_;
-      size_t W = W_;
-      size_t C = C_;
-      float alpha = 0.2f;
-
       cl_mem &input = S[1];
       cl_mem &output = B;
-
-      err = clSetKernelArg(kernel[device_num][K_LEAKYRELU], 0, sizeof(cl_mem), &input);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_LEAKYRELU], 1, sizeof(cl_mem), &output);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_LEAKYRELU], 2, sizeof(float), &alpha);
-      CHECK_ERROR(err);
-
-      size_t gws[1] = {H * W * C}, lws[1] = {128};
-      for (int i = 0; i < 1; ++i) {
-        gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
-      }
-
-      err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_LEAKYRELU], 1, NULL, gws, lws, 0, NULL, NULL);
-      CHECK_ERROR(err);
-      #ifdef FINISH
-      clFinish(queue[device_num]);
-      #endif
-      #ifdef SHOW_TIME
-      END_RE("1 -> 2 run kernel leakyrelu")
-      #endif
+      leakyrelu(device_num, input, output, 0.2f, H_, W_, C_);
     }
   }
   // 2 -> 8
@@ -1426,102 +1305,24 @@ void encoding(
     #ifdef SHOW_TIME
     START_RE
     #endif
-    cl_mem filter_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, filter.sz * sizeof(float), NULL, &err);
-    CHECK_ERROR(err);
-    cl_mem bias_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, bias.sz * sizeof(float), NULL, &err);
-    CHECK_ERROR(err);
     cl_mem scale_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, scale.sz * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
     cl_mem offset_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, offset.sz * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
 
-    err = clEnqueueWriteBuffer(queue[device_num], filter_mem, CL_TRUE, 0, filter.sz * sizeof(float), filter.buf, 0, NULL, NULL);
-    CHECK_ERROR(err);
-    err = clEnqueueWriteBuffer(queue[device_num], bias_mem, CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
-    CHECK_ERROR(err);
     err = clEnqueueWriteBuffer(queue[device_num], scale_mem, CL_TRUE, 0, scale.sz * sizeof(float), scale.buf, 0, NULL, NULL);
     CHECK_ERROR(err);
     err = clEnqueueWriteBuffer(queue[device_num], offset_mem, CL_TRUE, 0, offset.sz * sizeof(float), offset.buf, 0, NULL, NULL);
     CHECK_ERROR(err);
     #ifdef SHOW_TIME
+    // 이거 중복 아닌가?
     END_RE("3 -> 4 write filter bias scale offset")
     #endif
 
     { // conv2d
-      #ifdef SHOW_TIME
-      START_RE
-      #endif
-      size_t H = H_, W = W_, C = C_;
-      size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[3];
-      const size_t stride = 2, pad = 1;
-      size_t OH = H / stride, OW = W / stride;
-      size_t K_p = 0;
-      size_t OW_p = 0;
-      LOG2S(K, K_p);
-      LOG2S(OW, OW_p);
-      const size_t K_mask = ((1 << K_p) - 1);
-      const size_t OW_mask = ((1 << OW_p) - 1);
-      float alpha = 0.2f;
-
       cl_mem &input = B;
       cl_mem &output = A;
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 0, sizeof(cl_mem), &input);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 1, sizeof(cl_mem), &filter_mem);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 2, sizeof(cl_mem), &bias_mem);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 3, sizeof(cl_mem), &output);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 4, sizeof(int), &H);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 5, sizeof(int), &W);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 6, sizeof(int), &C);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 7, sizeof(int), &R);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 8, sizeof(int), &S);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 9, sizeof(int), &K);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 10, sizeof(int), &OH);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 11, sizeof(int), &OW);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 12, sizeof(int), &stride);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 13, sizeof(int), &pad);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 14, sizeof(int), &K_p);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 15, sizeof(int), &OW_p);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 16, sizeof(int), &K_mask);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_CONV2D], 17, sizeof(int), &OW_mask);
-      CHECK_ERROR(err);
-
-      size_t gws[1] = {OH * OW * K}, lws[1] = {128};
-      for (int i = 0; i < 1; ++i) {
-        gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
-      }
-
-      err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_CONV2D], 1, NULL, gws, lws, 0, NULL, NULL);
-      CHECK_ERROR(err);
-      #ifdef FINISH
-      clFinish(queue[device_num]);
-      #endif
-      #ifdef SHOW_TIME
-      END_RE("3 -> 4 run kernel conv2d")
-      #endif
-
-      // printf("%lu %lu %lu %lu %lu %lu | %lu %lu %lu %lu\n", H, W, C, OH, OW, K, OH, OW, stride, pas);
-      // printf("%f %f\n", filter.buf[0], bias.buf[0]);
-
-      H_ = OH;
-      W_ = OW;
-      C_ = K;
+      conv2d_kernel(device_num, input, output, filter, bias, H_, W_, C_);
     }
 
     cl_mem mean_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C_ * sizeof(float), NULL, &err);
@@ -1529,39 +1330,7 @@ void encoding(
     cl_mem variance_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C_ * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
     { // mean
-      #ifdef SHOW_TIME
-      START_RE
-      #endif
-      size_t H = H_;
-      size_t W = W_;
-      size_t C = C_;
-
-      cl_mem &input = A;
-
-      err = clSetKernelArg(kernel[device_num][K_MEAN], 0, sizeof(cl_mem), &input);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_MEAN], 1, sizeof(cl_mem), &mean_mem);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_MEAN], 2, sizeof(int), &H);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_MEAN], 3, sizeof(int), &W);
-      CHECK_ERROR(err);
-      err = clSetKernelArg(kernel[device_num][K_MEAN], 4, sizeof(int), &C);
-      CHECK_ERROR(err);
-
-      size_t gws[1] = {C}, lws[1] = {C};
-      for (int i = 0; i < 1; ++i) {
-        gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
-      }
-
-      err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_MEAN], 1, NULL, gws, lws, 0, NULL, NULL);
-      CHECK_ERROR(err);
-      #ifdef FINISH
-      clFinish(queue[device_num]);
-      #endif
-      #ifdef SHOW_TIME
-      END_RE("3 -> 4 run kernel mean")
-      #endif
+      mean_kernel(device_num, A, mean_mem, H_, W_, C_);
     }
 
     { // variance
@@ -1682,10 +1451,6 @@ void encoding(
       END_RE("<step> run kernel leakyrelu")
       #endif
     }
-
-    clReleaseMemObject(filter_mem);
-    clReleaseMemObject(bias_mem);
-
     clReleaseMemObject(scale_mem);
     clReleaseMemObject(offset_mem);
 
@@ -1960,5 +1725,153 @@ void encoding(
   }
   #ifdef SHOW_TIME
   END_RE("release mem object")
+  #endif
+}
+
+void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter, Tensor bias, size_t &H, size_t &W, size_t &C) {
+  size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[3];
+  const size_t stride = 2, pad = 1;
+  size_t OH = H / stride, OW = W / stride;
+  #ifdef SHOW_TIME
+  float st, et;
+  START_RE
+  #endif
+  cl_mem filter_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, filter.sz * sizeof(float), NULL, &err);
+  CHECK_ERROR(err);
+  cl_mem bias_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, bias.sz * sizeof(float), NULL, &err);
+  CHECK_ERROR(err);
+
+  err = clEnqueueWriteBuffer(queue[device_num], filter_mem, CL_TRUE, 0, filter.sz * sizeof(float), filter.buf, 0, NULL, NULL);
+  CHECK_ERROR(err);
+  err = clEnqueueWriteBuffer(queue[device_num], bias_mem, CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
+  CHECK_ERROR(err);
+  #ifdef SHOW_TIME
+  END_RE("1 -> 2 write filter bias")
+  #endif
+
+  #ifdef SHOW_TIME
+  START_RE
+  #endif
+  size_t K_p = 0;
+  size_t OW_p = 0;
+  LOG2S(K, K_p);
+  LOG2S(OW, OW_p);
+  const size_t K_mask = ((1 << K_p) - 1);
+  const size_t OW_mask = ((1 << OW_p) - 1);
+
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 0, sizeof(cl_mem), &input);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 1, sizeof(cl_mem), &filter_mem);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 2, sizeof(cl_mem), &bias_mem);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 3, sizeof(cl_mem), &output);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 4, sizeof(int), &H);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 5, sizeof(int), &W);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 6, sizeof(int), &C);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 7, sizeof(int), &R);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 8, sizeof(int), &S);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 9, sizeof(int), &K);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 10, sizeof(int), &OH);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 11, sizeof(int), &OW);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 12, sizeof(int), &stride);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 13, sizeof(int), &pad);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 14, sizeof(int), &K_p);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 15, sizeof(int), &OW_p);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 16, sizeof(int), &K_mask);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_CONV2D], 17, sizeof(int), &OW_mask);
+  CHECK_ERROR(err);
+
+  size_t gws[1] = {OH * OW * K}, lws[1] = {128};
+  for (int i = 0; i < 1; ++i) {
+    gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+  }
+
+  err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_CONV2D], 1, NULL, gws, lws, 0, NULL, NULL);
+  CHECK_ERROR(err);
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
+  #ifdef SHOW_TIME
+  END_RE("run kernel conv2d_leakyrelu")
+  #endif
+
+  clReleaseMemObject(filter_mem);
+  clReleaseMemObject(bias_mem);
+
+  H = OH;
+  W = OW;
+  C = K;
+}
+
+void leakyrelu(int device_num, cl_mem &input, cl_mem &output, float alpha, size_t H, size_t W, size_t C) {
+  #ifdef SHOW_TIME
+  float st, et;
+  START_RE
+  #endif
+  err = clSetKernelArg(kernel[device_num][K_LEAKYRELU], 0, sizeof(cl_mem), &input);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_LEAKYRELU], 1, sizeof(cl_mem), &output);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_LEAKYRELU], 2, sizeof(float), &alpha);
+  CHECK_ERROR(err);
+
+  size_t gws[1] = {H * W * C}, lws[1] = {128};
+  for (int i = 0; i < 1; ++i) {
+    gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+  }
+
+  err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_LEAKYRELU], 1, NULL, gws, lws, 0, NULL, NULL);
+  CHECK_ERROR(err);
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
+  #ifdef SHOW_TIME
+  END_RE("run kernel leakyrelu")
+  #endif
+}
+
+void mean_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, size_t &H, size_t &W, size_t &C) {
+  #ifdef SHOW_TIME
+  float st, et;
+  START_RE
+  #endif
+  err = clSetKernelArg(kernel[device_num][K_MEAN], 0, sizeof(cl_mem), &input);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_MEAN], 1, sizeof(cl_mem), &mean_mem);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_MEAN], 2, sizeof(int), &H);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_MEAN], 3, sizeof(int), &W);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_MEAN], 4, sizeof(int), &C);
+  CHECK_ERROR(err);
+
+  size_t gws[1] = {C}, lws[1] = {C};
+  for (int i = 0; i < 1; ++i) {
+    gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+  }
+
+  err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_MEAN], 1, NULL, gws, lws, 0, NULL, NULL);
+  CHECK_ERROR(err);
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
+  #ifdef SHOW_TIME
+  END_RE("run kernel mean")
   #endif
 }
