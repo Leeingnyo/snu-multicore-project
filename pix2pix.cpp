@@ -231,53 +231,11 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
     /*
      * Encoding phase
      */
-
-    // Encoder 1 : conv
-    auto filter = weights["generator/encoder_1/conv2d/kernel"];
-    auto bias = weights["generator/encoder_1/conv2d/bias"];
-    conv2d(one_image, filter, bias, encoder_layer[1]);
-
-    for (int i = 2; i <= 8; ++i) {
-      // Encoder i : leaky_relu => conv2d => batchnorm
-      auto scope = "generator/encoder_" + std::to_string(i);
-      auto filter = weights[scope + "/conv2d/kernel"];
-      auto bias = weights[scope + "/conv2d/bias"];
-      auto scale = weights[scope + "/batch_normalization/gamma"];
-      auto offset = weights[scope + "/batch_normalization/beta"];
-      encoder_layer_input[i] = encoder_layer[i - 1];
-      leaky_relu(encoder_layer_input[i], encoder_layer_rectified[i], 0.2);
-      conv2d(encoder_layer_rectified[i], filter, bias, encoder_layer_convolved[i]);
-      batchnorm(encoder_layer_convolved[i], scale, offset, encoder_layer[i]);
-    }
-
-    /*
-     * Decoding phase
-     */
-
-    for (int i = 8; i >= 1; --i) {
-      // Decoder i : relu => conv2d_transposed => batchnorm
-      auto scope = "generator/decoder_" + std::to_string(i);
-      auto filter = weights[scope + "/conv2d_transpose/kernel"];
-      auto bias = weights[scope + "/conv2d_transpose/bias"];
-      auto scale = weights[scope + "/batch_normalization/gamma"];
-      auto offset = weights[scope + "/batch_normalization/beta"];
-      if (i == 8) {
-        // For decoder 8, input is last layer of encoder
-        decoder_layer_input[i] = encoder_layer[8];
-      } else {
-        // For other decoder, input is concatenation of previous layer and corresponding encoder layer
-        concat(decoder_layer[i + 1], encoder_layer[i], decoder_layer_input[i]);
-      }
-      relu(decoder_layer_input[i], decoder_layer_rectified[i]);
-      conv2d_transposed(decoder_layer_rectified[i], filter, bias, decoder_layer_convolved[i]);
-
-      // Last decoder does not have batchnorm
-      if (i == 1) break;
-      batchnorm(decoder_layer_convolved[i], scale, offset, decoder_layer[i]);
-    }
+    Tensor pppp;
+    pix2pix_iter(0, one_image, pppp, weights);
 
     // Convert values into [-1, 1] using tanh function
-    elem_tanh(decoder_layer_convolved[1], decoder_layer[1]);
+    elem_tanh(pppp, decoder_layer[1]);
 
     // Put a image into output buffer
     postprocess_one_image(decoder_layer[1], output_buf, img_idx);
@@ -1445,8 +1403,8 @@ void pix2pix_iter(
   #ifdef SHOW_TIME
   START_RE
   #endif
-  encoded.alloc_once({HH, WW, CC});
-  err = clEnqueueReadBuffer(queue[device_num], S[8], CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
+  encoded.alloc_once({H_, W_, C_});
+  err = clEnqueueReadBuffer(queue[device_num], B, CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
   CHECK_ERROR(err);
   #ifdef FINISH
   clFinish(queue[device_num]);
