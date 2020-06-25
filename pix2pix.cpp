@@ -1275,7 +1275,6 @@ void encoding(
     size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[3];
     const size_t stride = 2, pad = 1;
     size_t OH = H / stride, OW = W / stride;
-    encoded.alloc_once({OH, OW, K});
 
     #ifdef SHOW_TIME
     START_RE
@@ -1595,21 +1594,6 @@ void encoding(
       END_RE("2 -> 3 run kernel batchnorm_leakyrelu")
       #endif
     }
-
-    #ifdef SHOW_TIME
-    START_RE
-    #endif
-    // write
-    err = clEnqueueReadBuffer(queue[device_num], B, CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
-    CHECK_ERROR(err);
-    #ifdef FINISH
-    clFinish(queue[device_num]);
-    #endif
-    #ifdef SHOW_TIME
-    END_RE("write")
-    #endif
-
-    printf("batchnorm_relu result   %f\n", encoded.buf[0]);
   }
   // 3 -> 8
   // conv2d
@@ -1723,21 +1707,6 @@ void encoding(
       W_ = OW;
       C_ = K;
     }
-
-    #ifdef SHOW_TIME
-    START_RE
-    #endif
-    // write
-    err = clEnqueueReadBuffer(queue[device_num], A, CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
-    CHECK_ERROR(err);
-    #ifdef FINISH
-    clFinish(queue[device_num]);
-    #endif
-    #ifdef SHOW_TIME
-    END_RE("write")
-    #endif
-
-    printf("conv2d result   %f\n", encoded.buf[0]);
 
     cl_mem mean_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C_ * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
@@ -1863,33 +1832,6 @@ void encoding(
       END_RE("3 -> 4 run kernel batchnorm_leakyrelu")
       #endif
     }
-
-    #ifdef SHOW_TIME
-    START_RE
-    #endif
-    // write
-    err = clEnqueueReadBuffer(queue[device_num], B, CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
-    CHECK_ERROR(err);
-    #ifdef FINISH
-    clFinish(queue[device_num]);
-    #endif
-    #ifdef SHOW_TIME
-    END_RE("write")
-    #endif
-
-    printf("batchnorm_relu result   %f\n", encoded.buf[0]);
-
-    /*
-    #ifdef SHOW_TIME
-    START_RE
-    #endif
-    #ifdef FINISH
-    clFinish(queue[device_num]);
-    #endif
-    #ifdef SHOW_TIME
-    END_RE("")
-    #endif
-    */
   }
   // 4 -> 5
   // conv2d
@@ -2023,21 +1965,6 @@ void encoding(
       C_ = K;
     }
 
-    #ifdef SHOW_TIME
-    START_RE
-    #endif
-    // write
-    err = clEnqueueReadBuffer(queue[device_num], A, CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
-    CHECK_ERROR(err);
-    #ifdef FINISH
-    clFinish(queue[device_num]);
-    #endif
-    #ifdef SHOW_TIME
-    END_RE("write")
-    #endif
-
-    printf("conv2d result   %f\n", encoded.buf[0]);
-
     cl_mem mean_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C_ * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
     cl_mem variance_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C_ * sizeof(float), NULL, &err);
@@ -2164,7 +2091,7 @@ void encoding(
   #ifdef SHOW_TIME
   START_RE
   #endif
-  // write
+  encoded.alloc_once({H_, W_, C_});
   err = clEnqueueReadBuffer(queue[device_num], B, CL_TRUE, 0, encoded.sz * sizeof(float), encoded.buf, 0, NULL, NULL);
   CHECK_ERROR(err);
   #ifdef FINISH
