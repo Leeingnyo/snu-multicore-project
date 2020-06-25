@@ -182,6 +182,9 @@ void pix2pix_init() {
 
   // alloc buffers
   // alloc mpi buffers
+  for (int d = 0; d < DEVICE_NUM; d++) {
+    clFinish(queue[d]);
+  }
 }
 
 void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t num_image) {
@@ -451,7 +454,7 @@ void pix2pix_iter(
   std::map<std::string, Tensor> &weights
 ) {
   #ifdef SHOW_TIME
-  float st, et;
+  double st, et;
   START_RE
   #endif
   cl_mem A = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, 1024 * 1024 * 8 * sizeof(float), NULL, &err);
@@ -676,7 +679,7 @@ void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter,
   const size_t stride = 2, pad = 1;
   size_t OH = H / stride, OW = W / stride;
   #ifdef SHOW_TIME
-  float st, et;
+  double st, et;
   START_RE
   #endif
   cl_mem filter_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, filter.sz * sizeof(float), NULL, &err);
@@ -766,7 +769,7 @@ void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter,
 
 void leakyrelu(int device_num, cl_mem &input, cl_mem &output, float alpha, size_t H, size_t W, size_t C) {
   #ifdef SHOW_TIME
-  float st, et;
+  double st, et;
   START_RE
   #endif
   err = clSetKernelArg(kernel[device_num][K_LEAKYRELU], 0, sizeof(cl_mem), &input);
@@ -793,7 +796,7 @@ void leakyrelu(int device_num, cl_mem &input, cl_mem &output, float alpha, size_
 
 void mean_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, size_t &H, size_t &W, size_t &C) {
   #ifdef SHOW_TIME
-  float st, et;
+  double st, et;
   START_RE
   #endif
   err = clSetKernelArg(kernel[device_num][K_MEAN], 0, sizeof(cl_mem), &input);
@@ -824,7 +827,7 @@ void mean_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, size_t &H, siz
 
 void variance_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, size_t H, size_t W, size_t C) {
   #ifdef SHOW_TIME
-  float st; et;
+  double st, et;
   START_RE
   #endif
 
@@ -858,7 +861,7 @@ void variance_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &va
 
 void batchnorm_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, cl_mem &output, cl_mem &offset_mem, cl_mem &scale_mem, size_t H, size_t W, size_t C) {
   #ifdef SHOW_TIME
-  float st, et;
+  double st, et;
   START_RE
   #endif
   size_t K_p = 0;
@@ -901,7 +904,7 @@ void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, Ten
   size_t OH = H * stride, OW = W * stride;
 
   #ifdef SHOW_TIME
-  float st, et;
+  double st, et;
   START_RE
   #endif
   cl_mem filter_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, filter.sz * sizeof(float), NULL, &err);
@@ -980,7 +983,7 @@ void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, Ten
 
 void concat_kernel(int device_num, cl_mem &input, cl_mem &input2, cl_mem &output, int H, int W, int C0, int C1, size_t &C) {
   #ifdef SHOW_TIME
-  float st, et;
+  double st, et;
   START_RE
   #endif
 
