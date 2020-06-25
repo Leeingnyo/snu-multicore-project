@@ -543,21 +543,28 @@ void pix2pix_iter(
     #ifdef SHOW_TIME
     START_RE
     #endif
-    cl_mem scale_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, scale.sz * sizeof(float), NULL, &err);
-    CHECK_ERROR(err);
-    cl_mem offset_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, offset.sz * sizeof(float), NULL, &err);
-    CHECK_ERROR(err);
+    if (!weight_buffers_bound[device_num][scope + "/batch_normalization/gamma"]) {
+      weight_buffers[device_num][scope + "/batch_normalization/gamma"] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, scale.sz * sizeof(float), NULL, &err);
+      CHECK_ERROR(err);
+      cl_mem &scale_mem = weight_buffers[device_num][scope + "/batch_normalization/gamma"];
+      err = clEnqueueWriteBuffer(queue[device_num], scale_mem, CL_TRUE, 0, scale.sz * sizeof(float), scale.buf, 0, NULL, NULL);
+      CHECK_ERROR(err);
+      weight_buffers_bound[device_num][scope + "/batch_normalization/gamma"] = true;
+    }
 
-    err = clEnqueueWriteBuffer(queue[device_num], scale_mem, CL_TRUE, 0, scale.sz * sizeof(float), scale.buf, 0, NULL, NULL);
-    CHECK_ERROR(err);
-    err = clEnqueueWriteBuffer(queue[device_num], offset_mem, CL_TRUE, 0, offset.sz * sizeof(float), offset.buf, 0, NULL, NULL);
-    CHECK_ERROR(err);
+    if (!weight_buffers_bound[device_num][scope + "/batch_normalization/beta"]) {
+      weight_buffers[device_num][scope + "/batch_normalization/beta"] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, offset.sz * sizeof(float), NULL, &err);
+      CHECK_ERROR(err);
+      cl_mem &offset_mem = weight_buffers[device_num][scope + "/batch_normalization/beta"];
+      err = clEnqueueWriteBuffer(queue[device_num], offset_mem, CL_TRUE, 0, offset.sz * sizeof(float), offset.buf, 0, NULL, NULL);
+      CHECK_ERROR(err);
+      weight_buffers_bound[device_num][scope + "/batch_normalization/beta"] = true;
+    }
     #ifdef FINISH
     clFinish(queue[device_num]);
     #endif
     #ifdef SHOW_TIME
-    // 이거 중복 아닌가?
-    END_RE("3 -> 4 write filter bias scale offset")
+    END_RE("3 -> 4 write scale offset")
     #endif
 
     { // leakyrelu (i = step)
@@ -623,11 +630,10 @@ void pix2pix_iter(
     { // batchnorm
       cl_mem &input = A;
       cl_mem &output = intermediate[step];
+      cl_mem &scale_mem = weight_buffers[device_num][scope + "/batch_normalization/gamma"];
+      cl_mem &offset_mem = weight_buffers[device_num][scope + "/batch_normalization/beta"];
       batchnorm_kernel(device_num, input, mean_mem, variance_mem, output, offset_mem, scale_mem, H_, W_, C_);
     }
-
-    clReleaseMemObject(scale_mem);
-    clReleaseMemObject(offset_mem);
 
     clReleaseMemObject(mean_mem);
     clReleaseMemObject(variance_mem);
@@ -673,15 +679,23 @@ void pix2pix_iter(
     auto scale = weights[scope + "/batch_normalization/gamma"];
     auto offset = weights[scope + "/batch_normalization/beta"];
 
-    cl_mem scale_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, scale.sz * sizeof(float), NULL, &err);
-    CHECK_ERROR(err);
-    cl_mem offset_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, offset.sz * sizeof(float), NULL, &err);
-    CHECK_ERROR(err);
+    if (!weight_buffers_bound[device_num][scope + "/batch_normalization/gamma"]) {
+      weight_buffers[device_num][scope + "/batch_normalization/gamma"] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, scale.sz * sizeof(float), NULL, &err);
+      CHECK_ERROR(err);
+      cl_mem &scale_mem = weight_buffers[device_num][scope + "/batch_normalization/gamma"];
+      err = clEnqueueWriteBuffer(queue[device_num], scale_mem, CL_TRUE, 0, scale.sz * sizeof(float), scale.buf, 0, NULL, NULL);
+      CHECK_ERROR(err);
+      weight_buffers_bound[device_num][scope + "/batch_normalization/gamma"] = true;
+    }
 
-    err = clEnqueueWriteBuffer(queue[device_num], scale_mem, CL_TRUE, 0, scale.sz * sizeof(float), scale.buf, 0, NULL, NULL);
-    CHECK_ERROR(err);
-    err = clEnqueueWriteBuffer(queue[device_num], offset_mem, CL_TRUE, 0, offset.sz * sizeof(float), offset.buf, 0, NULL, NULL);
-    CHECK_ERROR(err);
+    if (!weight_buffers_bound[device_num][scope + "/batch_normalization/beta"]) {
+      weight_buffers[device_num][scope + "/batch_normalization/beta"] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, offset.sz * sizeof(float), NULL, &err);
+      CHECK_ERROR(err);
+      cl_mem &offset_mem = weight_buffers[device_num][scope + "/batch_normalization/beta"];
+      err = clEnqueueWriteBuffer(queue[device_num], offset_mem, CL_TRUE, 0, offset.sz * sizeof(float), offset.buf, 0, NULL, NULL);
+      CHECK_ERROR(err);
+      weight_buffers_bound[device_num][scope + "/batch_normalization/beta"] = true;
+    }
 
     cl_mem mean_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C_ * sizeof(float), NULL, &err);
     CHECK_ERROR(err);
@@ -700,13 +714,12 @@ void pix2pix_iter(
     { // batchnorm
       cl_mem &input = B;
       cl_mem &output = A;
+      cl_mem &scale_mem = weight_buffers[device_num][scope + "/batch_normalization/gamma"];
+      cl_mem &offset_mem = weight_buffers[device_num][scope + "/batch_normalization/beta"];
       batchnorm_kernel(device_num, input, mean_mem, variance_mem, output, offset_mem, scale_mem, H_, W_, C_);
     }
     clReleaseMemObject(mean_mem);
     clReleaseMemObject(variance_mem);
-
-    clReleaseMemObject(scale_mem);
-    clReleaseMemObject(offset_mem);
   }
     /*
     // Convert values into [-1, 1] using tanh function
