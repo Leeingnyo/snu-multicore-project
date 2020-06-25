@@ -25,8 +25,8 @@ __kernel void conv2d(
   int OH, int OW, // 아웃풋 크기
   int stride, // 스트라이드
   int pad, // 패드
-  int K_p, OW_p,
-  int K_mask, OW_mask
+  int K_p, int OW_p,
+  int K_mask, int OW_mask
 ) {
   // 아웃이 잘 해서 잘 한다
   /*
