@@ -166,6 +166,47 @@ __kernel void conv2d_leakyrelu(
   output[idx] = x >= 0 ? x : alpha * x;
 }
 
+__kernel void mean(
+  __global float *input,
+  __global float *output,
+  int H,
+  int W,
+  int K
+) {
+  int k = get_global_id(0); // K
+
+  float sum = 0.0f;
+  for (int h = 0; h < H; ++h) {
+    for (int w = 0; w < W; ++w) {
+      sum += input[h * W * K + w * K + k];
+    }
+  }
+
+  output[k] = sum / (H * W);
+}
+
+__kernel void variance(
+  __global float *input,
+  __global float *mean,
+  __global float *output,
+  int H,
+  int W,
+  int K
+) {
+  int k = get_global_id(0); // K
+
+  float sum = 0.0f;
+  float mm = mean[k];
+  for (int h = 0; h < H; ++h) {
+    for (int w = 0; w < W; ++w) {
+      float ii = input[h * W * K + w * K + k];
+      sum += (ii - mm) * (ii - mm);
+    }
+  }
+
+  output[k] = sum / (H * W);
+}
+
 inline float atomicadd(volatile __global float* address, const float value){
   float old = value;
   while ((old = atomic_xchg(address, atomic_xchg(address, 0.0f)+old))!=0.0f);
