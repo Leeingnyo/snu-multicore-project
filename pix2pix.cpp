@@ -65,6 +65,9 @@ enum kernel_type { K_CONV2D, K_CONV2D_TRANSPOSED, K_CONV2D_LEAKYRELU, K_CONV2D_B
 
 int num_threads = 4;
 
+std::map<std::string, cl_mem> weight_buffers[DEVICE_NUM];
+std::map<std::string, bool> weight_buffers_bound[DEVICE_NUM];
+
 class Tensor {
 public:
   Tensor();
@@ -95,7 +98,7 @@ static void get_one_image(Tensor input, Tensor &output, size_t idx);
 static void elem_tanh(Tensor input, Tensor &output);
 
 void pix2pix_iter(int device_num, Tensor one_image, Tensor &encoded, std::map<std::string, Tensor> &weights);
-void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter, Tensor bias, size_t &H, size_t &W, size_t &C);
+void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, cl_mem &filter_mem, cl_mem &bias_mem, size_t &H, size_t &W, size_t &C, size_t R, size_t S, size_t K);
 void leakyrelu(int device_num, cl_mem &input, cl_mem &output, float alpha, size_t H, size_t W, size_t C);
 void mean_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, size_t &H, size_t &W, size_t &C);
 void variance_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, size_t H, size_t W, size_t C);
@@ -485,9 +488,43 @@ void pix2pix_iter(
   //
   {
     {
+      #ifdef SHOW_TIME
+      double st, et;
+      START_RE
+      #endif
       auto filter = weights["generator/encoder_1/conv2d/kernel"];
-      auto bias = weights["generator/encoder_1/conv2d/bias"];
-      conv2d_kernel(device_num, intermediate[0], intermediate[1], filter, bias, H_, W_, C_);
+
+      if (!weight_buffers_bound[device_num]["generator/encoder_1/conv2d/kernel"]) {
+        weight_buffers[device_num]["generator/encoder_1/conv2d/kernel"] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, filter.sz * sizeof(float), NULL, &err);
+        CHECK_ERROR(err);
+        cl_mem &filter_mem = weight_buffers[device_num]["generator/encoder_1/conv2d/kernel"];
+        err = clEnqueueWriteBuffer(queue[device_num], filter_mem, CL_TRUE, 0, filter.sz * sizeof(float), filter.buf, 0, NULL, NULL);
+        CHECK_ERROR(err);
+        weight_buffers_bound[device_num]["generator/encoder_1/conv2d/kernel"] = true;
+      }
+      if (!weight_buffers_bound[device_num]["generator/encoder_1/conv2d/bias"]) {
+        auto bias = weights["generator/encoder_1/conv2d/bias"];
+        weight_buffers[device_num]["generator/encoder_1/conv2d/bias"] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, bias.sz * sizeof(float), NULL, &err);
+        cl_mem &bias_mem = weight_buffers[device_num]["generator/encoder_1/conv2d/bias"];
+        CHECK_ERROR(err);
+        err = clEnqueueWriteBuffer(queue[device_num], bias_mem, CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
+        CHECK_ERROR(err);
+        weight_buffers[device_num]["generator/encoder_1/conv2d/bias"] = bias_mem;
+        weight_buffers_bound[device_num]["generator/encoder_1/conv2d/kernel"] = true;
+      }
+
+      cl_mem &filter_mem = weight_buffers[device_num]["generator/encoder_1/conv2d/kernel"];
+      cl_mem &bias_mem = weight_buffers[device_num]["generator/encoder_1/conv2d/bias"];
+      CHECK_ERROR(err);
+      #ifdef FINISH
+      clFinish(queue[device_num]);
+      #endif
+      #ifdef SHOW_TIME
+      END_RE("write filter bias")
+      #endif
+
+      size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[3];
+      conv2d_kernel(device_num, intermediate[0], intermediate[1], filter_mem, bias_mem, H_, W_, C_, R, S, K);
     }
   }
   // 2 -> 8
@@ -532,7 +569,41 @@ void pix2pix_iter(
     { // conv2d
       cl_mem &input = B;
       cl_mem &output = A;
-      conv2d_kernel(device_num, input, output, filter, bias, H_, W_, C_);
+      #ifdef SHOW_TIME
+      double st, et;
+      START_RE
+      #endif
+      if (!weight_buffers_bound[device_num][scope + "/conv2d/kernel"]) {
+        weight_buffers[device_num][scope + "/conv2d/kernel"] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, filter.sz * sizeof(float), NULL, &err);
+        CHECK_ERROR(err);
+        cl_mem &filter_mem = weight_buffers[device_num][scope + "/conv2d/kernel"];
+        err = clEnqueueWriteBuffer(queue[device_num], filter_mem, CL_TRUE, 0, filter.sz * sizeof(float), filter.buf, 0, NULL, NULL);
+        CHECK_ERROR(err);
+        weight_buffers_bound[device_num][scope + "/conv2d/kernel"] = true;
+      }
+      if (!weight_buffers_bound[device_num][scope + "/conv2d/bias"]) {
+        auto bias = weights[scope + "/conv2d/bias"];
+        weight_buffers[device_num][scope + "/conv2d/bias"] = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, bias.sz * sizeof(float), NULL, &err);
+        cl_mem &bias_mem = weight_buffers[device_num][scope + "/conv2d/bias"];
+        CHECK_ERROR(err);
+        err = clEnqueueWriteBuffer(queue[device_num], bias_mem, CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
+        CHECK_ERROR(err);
+        weight_buffers[device_num][scope + "/conv2d/bias"] = bias_mem;
+        weight_buffers_bound[device_num][scope + "/conv2d/kernel"] = true;
+      }
+
+      cl_mem &filter_mem = weight_buffers[device_num][scope + "/conv2d/kernel"];
+      cl_mem &bias_mem = weight_buffers[device_num][scope + "/conv2d/bias"];
+      CHECK_ERROR(err);
+      #ifdef FINISH
+      clFinish(queue[device_num]);
+      #endif
+      #ifdef SHOW_TIME
+      END_RE("write filter bias")
+      #endif
+
+      size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[3];
+      conv2d_kernel(device_num, input, output, filter_mem, bias_mem, H_, W_, C_, R, S, K);
     }
 
     cl_mem mean_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C_ * sizeof(float), NULL, &err);
@@ -674,31 +745,12 @@ void pix2pix_iter(
   #endif
 }
 
-void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter, Tensor bias, size_t &H, size_t &W, size_t &C) {
-  size_t R = filter.shape[0], S = filter.shape[1], K = filter.shape[3];
+void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, cl_mem &filter_mem, cl_mem &bias_mem, size_t &H, size_t &W, size_t &C, size_t R, size_t S, size_t K) {
   const size_t stride = 2, pad = 1;
   size_t OH = H / stride, OW = W / stride;
+
   #ifdef SHOW_TIME
   double st, et;
-  START_RE
-  #endif
-  cl_mem filter_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, filter.sz * sizeof(float), NULL, &err);
-  CHECK_ERROR(err);
-  cl_mem bias_mem = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, bias.sz * sizeof(float), NULL, &err);
-  CHECK_ERROR(err);
-
-  err = clEnqueueWriteBuffer(queue[device_num], filter_mem, CL_TRUE, 0, filter.sz * sizeof(float), filter.buf, 0, NULL, NULL);
-  CHECK_ERROR(err);
-  err = clEnqueueWriteBuffer(queue[device_num], bias_mem, CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
-  CHECK_ERROR(err);
-  #ifdef FINISH
-  clFinish(queue[device_num]);
-  #endif
-  #ifdef SHOW_TIME
-  END_RE("write filter bias")
-  #endif
-
-  #ifdef SHOW_TIME
   START_RE
   #endif
   size_t K_p = 0;
@@ -756,11 +808,8 @@ void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, Tensor filter,
   clFinish(queue[device_num]);
   #endif
   #ifdef SHOW_TIME
-  END_RE("run kernel conv2d_leakyrelu")
+  END_RE("run kernel conv2d")
   #endif
-
-  clReleaseMemObject(filter_mem);
-  clReleaseMemObject(bias_mem);
 
   H = OH;
   W = OW;
