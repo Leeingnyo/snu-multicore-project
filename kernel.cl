@@ -190,3 +190,55 @@ __kernel void elem_tanh(
   float x = input[idx];
   output[idx] = tanh(x);
 }
+
+
+
+
+// (R, S, C, K) => (R * S * C, K)
+__kernel void transform_filter(
+  __global float *filters,
+  __global float *output,
+  int R,
+  int S,
+  int C,
+  int K
+) {
+  int rs = get_global_id(0);
+  int r = rs / S;
+  int s = rs % S;
+  int c = get_global_id(1);
+  int k = get_global_id(2);
+  output[c * K * R * S + k * R * S + r * S + s] = input[r * S * C * K + s * C * K + c * K + k];
+}
+
+// (H, W, C) => (OH + OW, OH + OW * C)
+__kernel void transform_filter(
+  __global float *filters,
+  __global float *output,
+  int H,
+  int W,
+  int C,
+  int stride,
+  int pad
+) {
+  int rs = get_global_id(0);
+  int r = rs / S;
+  int s = rs % S;
+  int c = get_global_id(1);
+  int k = get_global_id(2);
+  output[
+}
+
+// (C, H, W) -> (H, W, C)
+__kernel void transform_out(
+  __global float *input,
+  __global float *output,
+  int H,
+  int W,
+  int C
+) {
+  int c = get_global_id(0);
+  int h = get_global_id(1);
+  int w = get_global_id(2);
+  output[h * W * C + w * C + c] = input[c * H * W + h * W + w];
+}

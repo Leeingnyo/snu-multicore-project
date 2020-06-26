@@ -1192,3 +1192,9 @@ void concat_kernel(int device_num, cl_mem &input, cl_mem &input2, cl_mem &output
 
   C = C0 + C1;
 }
+
+void transform_filter_kernel(int device_num, cl_mem &input, cl_mem &output, size_t H, size_t W, size_t C) {
+}
+
+void transform_input_kernel() {
+}
