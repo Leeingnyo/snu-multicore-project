@@ -194,7 +194,7 @@ __kernel void elem_tanh(
 
 
 
-// (R, S, C, K) => (R * S * C, K)
+// (R, S, C, K) => (K, C * R * S)
 __kernel void transform_filter(
   __global float *filters,
   __global float *output,
@@ -203,30 +203,38 @@ __kernel void transform_filter(
   int C,
   int K
 ) {
-  int rs = get_global_id(0);
+  int k = get_global_id(0);
+  int c = get_global_id(1);
+  int rs = get_global_id(2);
   int r = rs / S;
   int s = rs % S;
-  int c = get_global_id(1);
-  int k = get_global_id(2);
-  output[c * K * R * S + k * R * S + r * S + s] = input[r * S * C * K + s * C * K + c * K + k];
+
+  output[k * R * S * C + c * R * S + r * S + s] = filters[r * S * C * K + s * C * K + c * K + k];
 }
 
-// (H, W, C) => (OH + OW, OH + OW * C)
-__kernel void transform_filter(
-  __global float *filters,
+// (H, W, C) => (C * R * S, OH * OW)
+__kernel void transform_in(
+  __global float *input,
   __global float *output,
-  int H,
-  int W,
-  int C,
-  int stride,
-  int pad
+  int H, int W, int C,
+  int R, int S, int K,
+  int OH,
+  int OW
 ) {
-  int rs = get_global_id(0);
+  int c = get_global_id(0);
+  int rs = get_global_id(1);
   int r = rs / S;
   int s = rs % S;
-  int c = get_global_id(1);
-  int k = get_global_id(2);
-  output[
+  int o = get_global_id(2);
+  int oh = o / OW;
+  int ow = o % OW;
+
+  int ih = oh * 2 - 1 + r;
+  int iw = ow * 2 - 1 + s;
+  if (ih < 0 || ih >= H || iw < 0 || iw >= W) return;
+  for (int c = 0; c < C; c++) {
+    output[c * R * S * OH * OW + r * S * OH * OW + s * OH * OW + oh * OW + ow] = input[ih * W * C + iw * C + c];
+  }
 }
 
 // (C, H, W) -> (H, W, C)
@@ -241,4 +249,49 @@ __kernel void transform_out(
   int h = get_global_id(1);
   int w = get_global_id(2);
   output[h * W * C + w * C + c] = input[c * H * W + h * W + w];
+}
+
+#define TILE_SIZE 16
+// a little fast sgemm kernel by inyong
+__kernel void sgemm(__global float *A, __global float *B, __global float *C, int M, int N, int K) {
+  int i = get_global_id(0); // row index of C
+  int j = get_global_id(1); // column index of C
+
+  int ti = get_local_id(0); // row index of tile
+  int tj = get_local_id(1); // column index of tile
+
+  int gi = get_group_id(0); // row index of group
+  int gj = get_group_id(1); // column index of group
+
+  if (i >= M || j >= N) return; // boundary check
+
+  /*
+  __local float Atile[TILE_SIZE][TILE_SIZE];
+  __local float Btile[TILE_SIZE][TILE_SIZE];
+  */
+
+  float acc = 0.0f;
+  /*
+  int nt = K / TILE_SIZE + (K % TILE_SIZE != 0);
+  int ii = (gi * TILE_SIZE + ti);
+  int jj = (gj * TILE_SIZE + tj);
+  for (int t = 0; t < nt; t++) {
+    int tt = t * TILE_SIZE;
+    Atile[ti][tj] = A[ii * K + (tt + tj)];
+    Btile[ti][tj] = B[(tt + ti) * N + jj];
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int k = 0; k < TILE_SIZE; k++) {
+      acc += Atile[ti][k] * Btile[k][tj];
+    }
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+  }
+  */
+  for (int k = 0; k < K; k++) {
+    C[i * N + j] += A[i * K + k] * B[k * N + j];
+  }
+
+  C[i * N + j] = acc;
 }

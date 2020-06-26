@@ -53,7 +53,7 @@
 #define PADDING(x, y) (((x)-1)/(y)*(y)+(y))
 
 #define DEVICE_NUM 4
-#define KERNEL_NUM 8
+#define KERNEL_NUM 14
 
 static cl_int err;
 static cl_platform_id platform;
@@ -62,7 +62,7 @@ static cl_context context[DEVICE_NUM];
 static cl_command_queue queue[DEVICE_NUM];
 static cl_program program[DEVICE_NUM];
 static cl_kernel kernel[DEVICE_NUM][KERNEL_NUM];
-enum kernel_type { K_CONV2D, K_CONV2D_TRANSPOSED, K_MEAN, K_VARIANCE, K_BATCHNORM, K_LEAKYRELU, K_CONCAT, K_TANH };
+enum kernel_type { K_CONV2D, K_CONV2D_TRANSPOSED, K_MEAN, K_VARIANCE, K_BATCHNORM, K_LEAKYRELU, K_CONCAT, K_TANH, K_TRANS_FILTER, K_TRANS_OUT, K_TRANS_IN, K_MAT_MUL };
 
 int num_threads = DEVICE_NUM;
 
@@ -108,6 +108,11 @@ void variance_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &va
 void batchnorm_kernel(int device_num, cl_mem &input, cl_mem &mean_mem, cl_mem &variance_mem, cl_mem &output, cl_mem &offset_mem, cl_mem &scale_mem, size_t H, size_t W, size_t C);
 void conv2d_transposed_kernel(int device_num, cl_mem &input, cl_mem &output, cl_mem &filter_mem, cl_mem &bias_mem, size_t &H, size_t &W, size_t &C, size_t R, size_t S, size_t K);
 void concat_kernel(int device_num, cl_mem &input, cl_mem &input2, cl_mem &output, int H, int W, int C0, int C1, size_t &C);
+
+void transform_filter_kernel(int device_num, cl_mem &input, cl_mem &output, size_t R, size_t S, size_t C, size_t K);
+void transform_input_kernel(int device_num, cl_mem &input, cl_mem &output, size_t H, size_t W, size_t C, size_t R, size_t S, size_t K, size_t OH, size_t OW);
+void transform_output_kernel(int device_num, cl_mem &input, cl_mem &output, size_t H, size_t W, size_t C);
+void matmul_kernel(int device_num, cl_mem &A, cl_mem &B, cl_mem &output, size_t H, size_t W, size_t C, size_t R, size_t S, size_t K_, size_t OH, size_t OW);
 
 static cl_program create_and_build_program_with_source(cl_context context, cl_device_id device, const char *file_name) {
   FILE *file = fopen(file_name, "rb");
@@ -185,6 +190,10 @@ void pix2pix_init() {
     kernel[d][K_LEAKYRELU] = clCreateKernel(program[d], "leakyrelu", &err);
     kernel[d][K_CONCAT] = clCreateKernel(program[d], "concat", &err);
     kernel[d][K_TANH] = clCreateKernel(program[d], "elem_tanh", &err);
+    kernel[d][K_TRANS_FILTER] = clCreateKernel(program[d], "transform_filter", &err);
+    kernel[d][K_TRANS_OUT] = clCreateKernel(program[d], "transform_out", &err);
+    kernel[d][K_TRANS_IN] = clCreateKernel(program[d], "transform_in", &err);
+    kernel[d][K_MAT_MUL] = clCreateKernel(program[d], "sgemm", &err);
     CHECK_ERROR(err);
   }
 
@@ -882,6 +891,33 @@ void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, cl_mem &filter
   const size_t K_mask = ((1 << K_p) - 1);
   const size_t OW_mask = ((1 << OW_p) - 1);
 
+  /*
+  cl_mem transformed_filter = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, K * C * R * S * sizeof(float), NULL, &err);
+  CHECK_ERROR(err);
+  { // filter 올리기
+    transform_filter_kernel(device_num, filter_mem, transformed_filter, R, S, C, K);
+  }
+
+  cl_mem transformed_in = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, C * R * S * OH * OW * sizeof(float), NULL, &err);
+  CHECK_ERROR(err);
+  { // 행렬 올리기
+    transform_input_kernel(device_num, input, transformed_in, H, W, C, R, S, K, OH, OW);
+  }
+
+  cl_mem matmul_res = clCreateBuffer(context[device_num], CL_MEM_READ_WRITE, OH * OW * K * sizeof(float), NULL, &err);
+  CHECK_ERROR(err);
+  { // 곱하기 올리기
+    matmul_kernel(device_num, transformed_filter, transformed_in, matmul_res, H, W, C, R, S, K, OH, OW);
+  }
+
+  { // 마무리하기
+    transform_output_kernel(device_num, matmul_res, output, OH, OW, K);
+  }
+  clReleaseMemObject(transformed_filter);
+  clReleaseMemObject(transformed_in);
+  clReleaseMemObject(matmul_res);
+  */
+
   err = clSetKernelArg(kernel[device_num][K_CONV2D], 0, sizeof(cl_mem), &input);
   CHECK_ERROR(err);
   err = clSetKernelArg(kernel[device_num][K_CONV2D], 1, sizeof(cl_mem), &filter_mem);
@@ -926,6 +962,8 @@ void conv2d_kernel(int device_num, cl_mem &input, cl_mem &output, cl_mem &filter
 
   err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_CONV2D], 1, NULL, gws, lws, 0, NULL, NULL);
   CHECK_ERROR(err);
+  /*
+  */
   #ifdef FINISH
   clFinish(queue[device_num]);
   #endif
@@ -1193,8 +1231,150 @@ void concat_kernel(int device_num, cl_mem &input, cl_mem &input2, cl_mem &output
   C = C0 + C1;
 }
 
-void transform_filter_kernel(int device_num, cl_mem &input, cl_mem &output, size_t H, size_t W, size_t C) {
+void transform_filter_kernel(int device_num, cl_mem &input, cl_mem &output, size_t R, size_t S, size_t C, size_t K) {
+  #ifdef SHOW_TIME
+  double st, et;
+  START_RE
+  #endif
+
+  err = clSetKernelArg(kernel[device_num][K_TRANS_FILTER], 0, sizeof(cl_mem), &input);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_FILTER], 1, sizeof(cl_mem), &output);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_FILTER], 2, sizeof(int), &R);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_FILTER], 3, sizeof(int), &S);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_FILTER], 4, sizeof(int), &C);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_FILTER], 5, sizeof(int), &K);
+  CHECK_ERROR(err);
+
+  size_t gws[3] = {R * S, C, K}, lws[3] = {16, 1, 64};
+  for (int i = 0; i < 3; ++i) {
+    gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+  }
+
+  err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_TRANS_FILTER], 3, NULL, gws, lws, 0, NULL, NULL);
+  CHECK_ERROR(err);
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
+  #ifdef SHOW_TIME
+  END_RE("run kernel trans filter")
+  #endif
 }
 
-void transform_input_kernel() {
+void transform_input_kernel(int device_num, cl_mem &input, cl_mem &output, size_t H, size_t W, size_t C, size_t R, size_t S, size_t K, size_t OH, size_t OW) {
+  #ifdef SHOW_TIME
+  double st, et;
+  START_RE
+  #endif
+
+  err = clSetKernelArg(kernel[device_num][K_TRANS_IN], 0, sizeof(cl_mem), &input);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_IN], 1, sizeof(cl_mem), &output);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_IN], 2, sizeof(int), &H);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_IN], 3, sizeof(int), &W);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_IN], 4, sizeof(int), &C);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_IN], 5, sizeof(int), &R);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_IN], 6, sizeof(int), &S);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_IN], 7, sizeof(int), &K);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_IN], 8, sizeof(int), &OH);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_IN], 9, sizeof(int), &OW);
+  CHECK_ERROR(err);
+
+  size_t gws[3] = {C, R * S, OH * OW}, lws[3] = {1, 16, 64};
+  for (int i = 0; i < 3; ++i) {
+    gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+  }
+
+  err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_TRANS_IN], 3, NULL, gws, lws, 0, NULL, NULL);
+  CHECK_ERROR(err);
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
+  #ifdef SHOW_TIME
+  END_RE("run kernel trans in")
+  #endif
+}
+
+void transform_output_kernel(int device_num, cl_mem &input, cl_mem &output, size_t H, size_t W, size_t C) {
+  #ifdef SHOW_TIME
+  double st, et;
+  START_RE
+  #endif
+
+  err = clSetKernelArg(kernel[device_num][K_TRANS_OUT], 0, sizeof(cl_mem), &input);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_OUT], 1, sizeof(cl_mem), &output);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_OUT], 2, sizeof(int), &H);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_OUT], 3, sizeof(int), &W);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_TRANS_OUT], 4, sizeof(int), &C);
+  CHECK_ERROR(err);
+
+  size_t gws[3] = {C, H, W}, lws[3] = {1, 16, 16};
+  for (int i = 0; i < 3; ++i) {
+    gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+  }
+
+  err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_TRANS_OUT], 3, NULL, gws, lws, 0, NULL, NULL);
+  CHECK_ERROR(err);
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
+  #ifdef SHOW_TIME
+  END_RE("run kernel trans in")
+  #endif
+}
+
+void matmul_kernel(int device_num, cl_mem &A, cl_mem &B, cl_mem &output, size_t H, size_t W, size_t C, size_t R, size_t S, size_t K_, size_t OH, size_t OW) {
+  #ifdef SHOW_TIME
+  double st, et;
+  START_RE
+  #endif
+
+  int M = K_;
+  int N = OH * OW;
+  int K = R * S * C;
+
+  err = clSetKernelArg(kernel[device_num][K_MAT_MUL], 0, sizeof(cl_mem), &A);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_MAT_MUL], 1, sizeof(cl_mem), &B);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_MAT_MUL], 2, sizeof(cl_mem), &output);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_MAT_MUL], 3, sizeof(int), &M);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_MAT_MUL], 4, sizeof(int), &N);
+  CHECK_ERROR(err);
+  err = clSetKernelArg(kernel[device_num][K_MAT_MUL], 5, sizeof(int), &K);
+  CHECK_ERROR(err);
+
+  size_t gws[2] = {M, N}, lws[2] = {16, 16};
+  for (int i = 0; i < 2; ++i) {
+    gws[i] = (gws[i] + lws[i] - 1) / lws[i] * lws[i];
+  }
+
+  printf("M, N: %lu %lu\n", M, N);
+
+  err = clEnqueueNDRangeKernel(queue[device_num], kernel[device_num][K_MAT_MUL], 2, NULL, gws, lws, 0, NULL, NULL);
+  CHECK_ERROR(err);
+  #ifdef FINISH
+  clFinish(queue[device_num]);
+  #endif
+  #ifdef SHOW_TIME
+  END_RE("run kernel trans in")
+  #endif
 }
