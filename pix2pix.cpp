@@ -229,8 +229,8 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
   printf("아 %d %d\n", rank, max_num_image);
   size_t my_num_image = max_num_image;
   printf("아니 %d %d\n", rank, my_num_image);
-  if (num_image % max_num_image) {
-    if (rank >= num_image % max_num_image) {
+  if (num_image % RANKS) {
+    if (rank >= num_image % RANKS) {
       my_num_image--;
     }
   }
@@ -282,7 +282,7 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
     for (int r = 1; r < RANKS; r++) {
       printf("%d send\n", r);
       size_t ye_num_image = max_num_image;
-      if (num_image % max_num_image && r >= num_image % max_num_image) ye_num_image--;
+      if (num_image % RANKS && r >= num_image % RANKS) ye_num_image--;
       int err = MPI_Send(input_buf + sum * one_image_sz, one_image_sz * ye_num_image, MPI_UINT8_T, r, 0, MPI_COMM_WORLD);
       sum += ye_num_image;
       printf("%d done %d ye_num_image %d sum %d\n", r, err, ye_num_image, sum);
