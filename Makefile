@@ -16,4 +16,4 @@ clean:
 	rm -rf $(TARGET) $(OBJECTS)
 
 run: $(TARGET)
-	thorq --add --mode mpi --nodes 1 --slots 2 --timeout 3600 --device gpu/1080 ./$(TARGET) ../common/edges2cats_AtoB.bin $(ARGS)
+	thorq --add --mode mpi --nodes 4 --slots 1 --timeout 3600 --device gpu/1080 ./$(TARGET) ../common/edges2cats_AtoB.bin $(ARGS)

@@ -52,7 +52,7 @@
 #define TILE_SIZE 28
 #define PADDING(x, y) (((x)-1)/(y)*(y)+(y))
 
-#define DEVICE_NUM 1
+#define DEVICE_NUM 4
 #define KERNEL_NUM 8
 
 static cl_int err;
