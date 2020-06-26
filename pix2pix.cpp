@@ -64,7 +64,7 @@ static cl_program program[DEVICE_NUM];
 static cl_kernel kernel[DEVICE_NUM][KERNEL_NUM];
 enum kernel_type { K_CONV2D, K_CONV2D_TRANSPOSED, K_MEAN, K_VARIANCE, K_BATCHNORM, K_LEAKYRELU, K_CONCAT, K_TANH };
 
-int num_threads = 4;
+int num_threads = DEVICE_NUM;
 
 std::map<std::string, cl_mem> weight_buffers[DEVICE_NUM];
 std::map<std::string, bool> weight_buffers_bound[DEVICE_NUM];
@@ -223,7 +223,9 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
   // Declare feature maps
   // Memory for feature maps are allocated when they are written first time using Tensor::alloc_once(...)
 
-  // #pragma omp parallel for num_threads(num_threads)
+  #if DEVICE_NUM != 1
+  #pragma omp parallel for num_threads(num_threads)
+  #endif
   for (size_t img_idx = 0; img_idx < num_image; ++img_idx) {
     Tensor one_image;
 
@@ -234,7 +236,7 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
      * Encoding phase
      */
     Tensor processed;
-    pix2pix_iter(img_idx % DEVICE_NUM, one_image, processed, weights);
+    pix2pix_iter(omp_get_thread_num(), one_image, processed, weights);
 
     // Put a image into output buffer
     postprocess_one_image(processed, output_buf, img_idx);
