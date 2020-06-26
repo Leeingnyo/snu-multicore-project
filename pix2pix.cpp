@@ -508,7 +508,7 @@ void pix2pix_iter(
         err = clEnqueueWriteBuffer(queue[device_num], bias_mem, CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
         CHECK_ERROR(err);
         weight_buffers[device_num]["generator/encoder_1/conv2d/bias"] = bias_mem;
-        weight_buffers_bound[device_num]["generator/encoder_1/conv2d/kernel"] = true;
+        weight_buffers_bound[device_num]["generator/encoder_1/conv2d/bias"] = true;
       }
 
       cl_mem &filter_mem = weight_buffers[device_num]["generator/encoder_1/conv2d/kernel"];
@@ -594,7 +594,7 @@ void pix2pix_iter(
         err = clEnqueueWriteBuffer(queue[device_num], bias_mem, CL_TRUE, 0, bias.sz * sizeof(float), bias.buf, 0, NULL, NULL);
         CHECK_ERROR(err);
         weight_buffers[device_num][scope + "/conv2d/bias"] = bias_mem;
-        weight_buffers_bound[device_num][scope + "/conv2d/kernel"] = true;
+        weight_buffers_bound[device_num][scope + "/conv2d/bias"] = true;
       }
 
       cl_mem &filter_mem = weight_buffers[device_num][scope + "/conv2d/kernel"];
