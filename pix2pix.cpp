@@ -335,7 +335,7 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
     for (int r = 1; r < RANKS; r++) {
       printf("%d wait\n", r);
       size_t ye_num_image = max_num_image;
-      if (num_image % max_num_image && r >= num_image % max_num_image) ye_num_image--;
+      if (num_image % RANKS && r >= num_image % RANKS) ye_num_image--;
       int err = MPI_Recv(output_buf + sum * one_image_sz, ye_num_image * one_image_sz, MPI_UINT8_T, r, 0, MPI_COMM_WORLD, NULL);
       sum += ye_num_image;
       printf("%d done %d ye_num_image %d sum %d\n", r, err, ye_num_image, sum);
