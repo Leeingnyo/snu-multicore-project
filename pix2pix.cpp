@@ -217,16 +217,66 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
    *   3. gather outputs from others to rank 0
    */
 
+  #ifdef USE_MPI
+  int RANKS;
+  MPI_Comm_size(MPI_COMM_WORLD, &RANKS);
+  MPI_Bcast(&num_image, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+  int rank = get_rank();
+  size_t one_image_sz = 256 * 256 * 3;
+
+  size_t max_num_image = (num_image + RANKS - 1) / RANKS;
+  size_t my_num_image = max_num_image;
+  if (num_image % RANKS) {
+    if (rank >= num_image % RANKS) {
+      my_num_image--;
+    }
+  }
+  size_t input_sz = my_num_image * (one_image_sz * sizeof(uint8_t));
+  
+  if (rank) {
+    input_buf = (uint8_t *)malloc(input_sz);
+  }
+  if (rank) {
+    output_buf = (uint8_t *)malloc(input_sz);
+  }
+  if (rank) {
+    weight_buf = (float *)malloc(54431363 * sizeof(float));
+  }
+  // MPI_Bcast(weight_buf, 30000000, MPI_FLOAT, 0, MPI_COMM_WORLD);
+  MPI_Bcast(weight_buf, 54431363, MPI_FLOAT, 0, MPI_COMM_WORLD);
+
+  if (rank) {
+    int err = MPI_Recv(input_buf, my_num_image * one_image_sz, MPI_UINT8_T, 0, 0, MPI_COMM_WORLD, NULL);
+  } else {
+    int sum = my_num_image;
+    for (int r = 1; r < RANKS; r++) {
+      size_t ye_num_image = max_num_image;
+      if (num_image % RANKS && r >= num_image % RANKS) ye_num_image--;
+      int err = MPI_Send(input_buf + sum * one_image_sz, one_image_sz * ye_num_image, MPI_UINT8_T, r, 0, MPI_COMM_WORLD);
+      sum += ye_num_image;
+    }
+  }
+  #endif
+
   auto weights = register_weights(weight_buf); // Memory allocated for weights
+  #ifdef USE_MPI
+  auto input = preprocess(input_buf, my_num_image); // Memory allocated for input
+  #else
   auto input = preprocess(input_buf, num_image); // Memory allocated for input
+  #endif
 
   // Declare feature maps
   // Memory for feature maps are allocated when they are written first time using Tensor::alloc_once(...)
 
-  #if DEVICE_NUM != 1
+  #if DEVICE_NUM == 1
+  #else
   #pragma omp parallel for num_threads(num_threads)
   #endif
+  #ifdef USE_MPI
+  for (size_t img_idx = 0; img_idx < my_num_image; ++img_idx) {
+  #else
   for (size_t img_idx = 0; img_idx < num_image; ++img_idx) {
+  #endif
     Tensor one_image;
 
     // Pick 1 image out of num_image
@@ -241,6 +291,20 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
     // Put a image into output buffer
     postprocess_one_image(processed, output_buf, img_idx);
   }
+
+  #ifdef USE_MPI
+  if (rank) {
+    int err = MPI_Send(output_buf, one_image_sz * my_num_image, MPI_UINT8_T, 0, 0, MPI_COMM_WORLD);
+  } else {
+    int sum = my_num_image;
+    for (int r = 1; r < RANKS; r++) {
+      size_t ye_num_image = max_num_image;
+      if (num_image % RANKS && r >= num_image % RANKS) ye_num_image--;
+      int err = MPI_Recv(output_buf + sum * one_image_sz, ye_num_image * one_image_sz, MPI_UINT8_T, r, 0, MPI_COMM_WORLD, NULL);
+      sum += ye_num_image;
+    }
+  }
+  #endif
 }
 
 Tensor::Tensor() : buf(NULL) {}
