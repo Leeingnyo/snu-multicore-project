@@ -220,30 +220,44 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
   #ifdef USE_MPI
   int RANKS;
   MPI_Comm_size(MPI_COMM_WORLD, &RANKS);
-  printf("mpi %d\n", RANKS);
-  size_t one_image_sz = 256 * 256 * 3;
+  MPI_Bcast(&num_image, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
   int rank = get_rank();
+  printf("mpi %d %d\n", RANKS, rank);
+  size_t one_image_sz = 256 * 256 * 3;
 
   size_t max_num_image = (num_image + RANKS - 1) / RANKS;
+  printf("아 %d %d\n", rank, max_num_image);
   size_t my_num_image = max_num_image;
+  printf("아니 %d %d\n", rank, my_num_image);
   if (num_image % max_num_image) {
     if (rank >= num_image % max_num_image) {
       my_num_image--;
     }
   }
+  printf("아니야 %d %d\n", rank, my_num_image);
+  fflush(stdout);
   size_t input_sz = my_num_image * (one_image_sz * sizeof(uint8_t));
   
-  if (!input_buf) {
+  printf("1 %d\n", rank);
+  fflush(stdout);
+  if (rank) {
     input_buf = (uint8_t *)malloc(input_sz);
   }
-  if (!output_buf) {
+  printf("2 %d\n", rank);
+  fflush(stdout);
+  if (rank) {
     output_buf = (uint8_t *)malloc(input_sz);
   }
-  if (!weight_buf) {
+  printf("3 %d\n", rank);
+  fflush(stdout);
+  if (rank) {
     weight_buf = (float *)malloc(54431363 * sizeof(float));
   }
+  printf("4 %d\n", rank);
+  fflush(stdout);
 
-  printf("before %d my_num_image %d \n", my_num_image);
+  printf("before %d my_num_image %d \n", rank, my_num_image);
+  fflush(stdout);
 
   /*
   if (rank) {
@@ -254,7 +268,8 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
     }
   }
   */
-  MPI_Bcast(weight_buf, 54431363, MPI_FLOAT, 0, MPI_COMM_WORLD);
+  MPI_Bcast(weight_buf, 30000000, MPI_FLOAT, 0, MPI_COMM_WORLD);
+  MPI_Bcast(weight_buf + 30000000, 24431363, MPI_FLOAT, 0, MPI_COMM_WORLD);
   printf("B cast %d \n", rank);
 
   if (rank) {
@@ -265,12 +280,12 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
   } else {
     int sum = my_num_image;
     for (int r = 1; r < RANKS; r++) {
-      printf("%d send", r);
+      printf("%d send\n", r);
       size_t ye_num_image = max_num_image;
       if (num_image % max_num_image && r >= num_image % max_num_image) ye_num_image--;
       int err = MPI_Send(input_buf + sum * one_image_sz, one_image_sz * ye_num_image, MPI_UINT8_T, r, 0, MPI_COMM_WORLD);
       sum += ye_num_image;
-      printf("%d done %d ye_num_image %d sum %d", r, err, ye_num_image, sum);
+      printf("%d done %d ye_num_image %d sum %d\n", r, err, ye_num_image, sum);
     }
   }
   printf("A cast %d \n", rank);
@@ -312,19 +327,18 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
 
   #ifdef USE_MPI
   if (rank) {
-    printf("%d wait\n", rank);
-    printf("%p\n", input_buf);
-    printf("%d recv %d\n", rank, err);
+    printf("gather %d send\n", rank);
     int err = MPI_Send(output_buf, one_image_sz * my_num_image, MPI_UINT8_T, 0, 0, MPI_COMM_WORLD);
+    printf("gather %d done %d\n", rank, err);
   } else {
     int sum = my_num_image;
     for (int r = 1; r < RANKS; r++) {
-      printf("%d send", r);
+      printf("%d wait\n", r);
       size_t ye_num_image = max_num_image;
       if (num_image % max_num_image && r >= num_image % max_num_image) ye_num_image--;
-      int err = MPI_Recv(output_buf + sum * one_image_sz, ye_num_image * one_image_sz, MPI_UINT8_T, 0, 0, MPI_COMM_WORLD, NULL);
+      int err = MPI_Recv(output_buf + sum * one_image_sz, ye_num_image * one_image_sz, MPI_UINT8_T, r, 0, MPI_COMM_WORLD, NULL);
       sum += ye_num_image;
-      printf("%d done %d ye_num_image %d sum %d", r, err, ye_num_image, sum);
+      printf("%d done %d ye_num_image %d sum %d\n", r, err, ye_num_image, sum);
     }
   }
   printf("A gather %d \n", rank);
