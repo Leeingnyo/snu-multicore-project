@@ -52,7 +52,7 @@
 #define TILE_SIZE 28
 #define PADDING(x, y) (((x)-1)/(y)*(y)+(y))
 
-#define DEVICE_NUM 4
+#define DEVICE_NUM 1
 #define KERNEL_NUM 8
 
 static cl_int err;
@@ -217,13 +217,62 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
    *   3. gather outputs from others to rank 0
    */
 
+  #ifdef USE_MPI
+  int RANKS;
+  MPI_Comm_size(MPI_COMM_WORLD, &RANKS);
+  printf("mpi %d", RANKS);
+  size_t one_image_sz = 256 * 256 * 3;
+  size_t input_sz = num_image * (one_image_sz * sizeof(uint8_t));
+  int rank = get_rank();
+  
+  if (!input_buf) {
+    input_buf = (uint8_t *)malloc(input_sz);
+  }
+  if (!output_buf) {
+    output_buf = (uint8_t *)malloc(input_sz);
+  }
+  if (!weight_buf) {
+    weight_buf = (float *)malloc(54431363 * sizeof(float));
+  }
+
+  printf("before %d \n", rank);
+
+  if (rank) {
+    MPI_Recv(weight_buf, 54431363, MPI_FLOAT, 0, 0, MPI_COMM_WORLD, NULL);
+  } else {
+    for (int r = 1; r < RANKS; r++) {
+      MPI_Send(weight_buf, 54431363, MPI_FLOAT, r, 0, MPI_COMM_WORLD);
+    }
+  }
+  printf("B cast %d \n", rank);
+
+  if (rank) {
+    printf("%d wait\n", rank);
+    printf("%p\n", input_buf);
+    int err = MPI_Recv(input_buf, one_image_sz * num_image, MPI_UINT8_T, 0, 0, MPI_COMM_WORLD, NULL);
+    printf("%d recv %d\n", rank, err);
+  } else {
+    for (int r = 1; r < RANKS; r++) {
+      printf("%d send", r);
+      int err = MPI_Send(input_buf, one_image_sz * num_image, MPI_UINT8_T, r, 0, MPI_COMM_WORLD);
+      printf("%d done %d", r, err);
+    }
+  }
+
+  printf("A cast %d \n", rank);
+  printf("we %p %d\n", weight_buf, rank);
+  MPI_Barrier(MPI_COMM_WORLD);
+  // if (rank) return;
+  #endif
+
   auto weights = register_weights(weight_buf); // Memory allocated for weights
   auto input = preprocess(input_buf, num_image); // Memory allocated for input
 
   // Declare feature maps
   // Memory for feature maps are allocated when they are written first time using Tensor::alloc_once(...)
 
-  #if DEVICE_NUM != 1
+  #if DEVICE_NUM == 1
+  #else
   #pragma omp parallel for num_threads(num_threads)
   #endif
   for (size_t img_idx = 0; img_idx < num_image; ++img_idx) {
