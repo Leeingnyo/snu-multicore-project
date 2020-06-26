@@ -220,10 +220,18 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
   #ifdef USE_MPI
   int RANKS;
   MPI_Comm_size(MPI_COMM_WORLD, &RANKS);
-  printf("mpi %d", RANKS);
+  printf("mpi %d\n", RANKS);
   size_t one_image_sz = 256 * 256 * 3;
-  size_t input_sz = num_image * (one_image_sz * sizeof(uint8_t));
   int rank = get_rank();
+
+  size_t max_num_image = (num_image + RANKS - 1) / RANKS;
+  size_t my_num_image = max_num_image;
+  if (num_image % max_num_image) {
+    if (rank >= num_image % max_num_image) {
+      my_num_image--;
+    }
+  }
+  size_t input_sz = my_num_image * (one_image_sz * sizeof(uint8_t));
   
   if (!input_buf) {
     input_buf = (uint8_t *)malloc(input_sz);
@@ -235,8 +243,9 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
     weight_buf = (float *)malloc(54431363 * sizeof(float));
   }
 
-  printf("before %d \n", rank);
+  printf("before %d my_num_image %d \n", my_num_image);
 
+  /*
   if (rank) {
     MPI_Recv(weight_buf, 54431363, MPI_FLOAT, 0, 0, MPI_COMM_WORLD, NULL);
   } else {
@@ -244,29 +253,35 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
       MPI_Send(weight_buf, 54431363, MPI_FLOAT, r, 0, MPI_COMM_WORLD);
     }
   }
+  */
+  MPI_Bcast(weight_buf, 54431363, MPI_FLOAT, 0, MPI_COMM_WORLD);
   printf("B cast %d \n", rank);
 
   if (rank) {
     printf("%d wait\n", rank);
     printf("%p\n", input_buf);
-    int err = MPI_Recv(input_buf, one_image_sz * num_image, MPI_UINT8_T, 0, 0, MPI_COMM_WORLD, NULL);
+    int err = MPI_Recv(input_buf, my_num_image * one_image_sz, MPI_UINT8_T, 0, 0, MPI_COMM_WORLD, NULL);
     printf("%d recv %d\n", rank, err);
   } else {
+    int sum = my_num_image;
     for (int r = 1; r < RANKS; r++) {
       printf("%d send", r);
-      int err = MPI_Send(input_buf, one_image_sz * num_image, MPI_UINT8_T, r, 0, MPI_COMM_WORLD);
-      printf("%d done %d", r, err);
+      size_t ye_num_image = max_num_image;
+      if (num_image % max_num_image && r >= num_image % max_num_image) ye_num_image--;
+      int err = MPI_Send(input_buf + sum * one_image_sz, one_image_sz * ye_num_image, MPI_UINT8_T, r, 0, MPI_COMM_WORLD);
+      sum += ye_num_image;
+      printf("%d done %d ye_num_image %d sum %d", r, err, ye_num_image, sum);
     }
   }
-
   printf("A cast %d \n", rank);
-  printf("we %p %d\n", weight_buf, rank);
-  MPI_Barrier(MPI_COMM_WORLD);
-  // if (rank) return;
   #endif
 
   auto weights = register_weights(weight_buf); // Memory allocated for weights
+  #ifdef USE_MPI
+  auto input = preprocess(input_buf, my_num_image); // Memory allocated for input
+  #else
   auto input = preprocess(input_buf, num_image); // Memory allocated for input
+  #endif
 
   // Declare feature maps
   // Memory for feature maps are allocated when they are written first time using Tensor::alloc_once(...)
@@ -275,7 +290,11 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
   #else
   #pragma omp parallel for num_threads(num_threads)
   #endif
+  #ifdef USE_MPI
+  for (size_t img_idx = 0; img_idx < my_num_image; ++img_idx) {
+  #else
   for (size_t img_idx = 0; img_idx < num_image; ++img_idx) {
+  #endif
     Tensor one_image;
 
     // Pick 1 image out of num_image
@@ -290,6 +309,27 @@ void pix2pix(uint8_t *input_buf, float *weight_buf, uint8_t *output_buf, size_t 
     // Put a image into output buffer
     postprocess_one_image(processed, output_buf, img_idx);
   }
+
+  #ifdef USE_MPI
+  if (rank) {
+    printf("%d wait\n", rank);
+    printf("%p\n", input_buf);
+    printf("%d recv %d\n", rank, err);
+    int err = MPI_Send(output_buf, one_image_sz * my_num_image, MPI_UINT8_T, 0, 0, MPI_COMM_WORLD);
+  } else {
+    int sum = my_num_image;
+    for (int r = 1; r < RANKS; r++) {
+      printf("%d send", r);
+      size_t ye_num_image = max_num_image;
+      if (num_image % max_num_image && r >= num_image % max_num_image) ye_num_image--;
+      int err = MPI_Recv(output_buf + sum * one_image_sz, ye_num_image * one_image_sz, MPI_UINT8_T, 0, 0, MPI_COMM_WORLD, NULL);
+      sum += ye_num_image;
+      printf("%d done %d ye_num_image %d sum %d", r, err, ye_num_image, sum);
+    }
+  }
+  printf("A gather %d \n", rank);
+
+  #endif
 }
 
 Tensor::Tensor() : buf(NULL) {}
